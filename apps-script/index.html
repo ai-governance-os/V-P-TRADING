@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <style>
+    :root{
+      --bg:#f5f6f8; --card:#fff; --ink:#1a1d21; --muted:#8a9099; --line:#e8eaed;
+      --brand:#2f6bff; --brand-soft:#e9f0ff; --green:#12b886; --green-soft:#e6f8f1;
+      --amber:#f59f00; --amber-soft:#fff4e0; --radius:16px;
+      --shadow:0 1px 2px rgba(20,30,50,.04),0 4px 16px rgba(20,30,50,.06);
+    }
+    *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+    body{font-family:-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;
+      margin:0;background:var(--bg);color:var(--ink);padding-bottom:78px;font-size:15px}
+    /* header */
+    .appbar{background:linear-gradient(135deg,#2f6bff,#5b8cff);color:#fff;padding:16px 16px 18px;
+      position:sticky;top:0;z-index:20}
+    .appbar h1{margin:0;font-size:17px;font-weight:650;letter-spacing:.2px}
+    .appbar .sub{font-size:12px;opacity:.85;margin-top:2px}
+    .wrap{max-width:520px;margin:0 auto;padding:14px}
+    /* cards */
+    .card{background:var(--card);border-radius:var(--radius);padding:15px;margin-bottom:13px;box-shadow:var(--shadow)}
+    .card h2{margin:0 0 12px;font-size:14px;font-weight:650}
+    label{display:block;font-size:12px;color:var(--muted);margin:12px 0 5px;font-weight:500}
+    input,select,textarea{width:100%;padding:11px 12px;font-size:15px;border-radius:11px;
+      border:1px solid var(--line);background:#fbfbfc;color:var(--ink);outline:none;transition:.15s}
+    input:focus,select:focus{border-color:var(--brand);background:#fff;box-shadow:0 0 0 3px var(--brand-soft)}
+    .row{display:flex;gap:10px}.row>div{flex:1}
+    button{width:100%;padding:13px;font-size:15px;font-weight:600;border-radius:12px;border:none;
+      background:var(--brand);color:#fff;cursor:pointer;margin-top:12px;transition:.15s;letter-spacing:.3px}
+    button:active{transform:scale(.985)}
+    button.ghost{background:#fff;color:var(--ink);border:1px solid var(--line)}
+    button.wa{background:var(--green)}
+    button.sm{width:auto;padding:8px 14px;font-size:13px;margin:0}
+    /* stat cards */
+    .stats{display:flex;gap:10px}
+    .stat{flex:1;border-radius:14px;padding:13px;background:var(--brand-soft)}
+    .stat.g{background:var(--green-soft)}.stat.n{background:#f0f1f3}
+    .stat .k{font-size:11.5px;color:var(--muted);font-weight:500}
+    .stat .v{font-size:21px;font-weight:700;margin-top:3px;line-height:1.1}
+    .stat .v small{font-size:12px;font-weight:600;color:var(--muted)}
+    /* salesman search combobox */
+    .combo{position:relative}
+    .combo .picked{display:flex;align-items:center;gap:10px;padding:12px;border:1px solid var(--line);
+      border-radius:12px;background:#fff;cursor:pointer}
+    .avatar{width:38px;height:38px;border-radius:50%;background:var(--brand);color:#fff;font-weight:700;
+      display:flex;align-items:center;justify-content:center;font-size:15px;flex:0 0 auto}
+    .picked .nm{font-weight:650;font-size:15px}
+    .picked .meta{font-size:12px;color:var(--muted);margin-top:1px}
+    .picked .chev{margin-left:auto;color:var(--muted);font-size:13px}
+    .dd{position:absolute;left:0;right:0;top:0;background:#fff;border:1px solid var(--line);
+      border-radius:14px;box-shadow:0 8px 28px rgba(20,30,50,.16);z-index:30;overflow:hidden;display:none}
+    .dd.open{display:block}
+    .dd .search{padding:10px;border-bottom:1px solid var(--line)}
+    .dd .list{max-height:260px;overflow-y:auto}
+    .opt{padding:10px 12px;display:flex;align-items:center;gap:10px;cursor:pointer;border-bottom:1px solid #f2f3f5}
+    .opt:hover,.opt.hi{background:var(--brand-soft)}
+    .opt .nm{font-weight:600;font-size:14px}
+    .opt .meta{font-size:11.5px;color:var(--muted)}
+    .opt.add{color:var(--brand);font-weight:600;justify-content:center}
+    .badges{display:flex;flex-wrap:wrap;gap:7px;margin-top:10px}
+    .badge{font-size:12px;padding:5px 10px;border-radius:20px;background:#f0f1f3;color:#4b5158;font-weight:500}
+    .badge.brand{background:var(--brand-soft);color:var(--brand)}
+    .badge.reg{background:var(--amber-soft);color:#b5730a}
+    /* set type segmented */
+    .seg{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}
+    .seg .s{flex:1 1 auto;min-width:64px;text-align:center;padding:10px 6px;border:1px solid var(--line);
+      border-radius:11px;background:#fbfbfc;font-size:13.5px;font-weight:600;cursor:pointer;color:#4b5158}
+    .seg .s.on{background:var(--brand);color:#fff;border-color:var(--brand)}
+    /* result display */
+    .calc{display:flex;gap:10px;margin-top:14px}
+    .calc .c{flex:1;border-radius:14px;padding:13px;text-align:center}
+    .calc .c.t{background:var(--brand-soft)}.calc .c.m{background:var(--green-soft)}
+    .calc .k{font-size:11.5px;color:var(--muted)}
+    .calc .v{font-size:24px;font-weight:750;margin-top:2px}
+    /* order rows */
+    .ord{display:flex;align-items:center;gap:11px;padding:11px 0;border-bottom:1px solid #f2f3f5}
+    .ord:last-child{border-bottom:none}
+    .ord .nm{font-weight:600;font-size:14px}
+    .ord .meta{font-size:12px;color:var(--muted);margin-top:1px}
+    .ord .amt{margin-left:auto;text-align:right}
+    .ord .amt .t{font-weight:700;font-size:14px}
+    .ord .amt .m{font-size:11.5px;color:var(--green);font-weight:600}
+    .ord .del{margin-left:10px;font-size:16px;cursor:pointer;opacity:.55;padding:4px}
+    .ord .del:active{opacity:1}
+    .pill{display:inline-block;font-size:10.5px;padding:2px 8px;border-radius:9px;background:#eef0f2;color:#666;margin-left:6px}
+    .pill.PC{background:var(--green-soft);color:var(--green)}
+    table{width:100%;border-collapse:collapse;font-size:12.5px}
+    th,td{text-align:left;padding:8px 5px;border-bottom:1px solid #f2f3f5;white-space:nowrap}
+    th{color:var(--muted);font-weight:500}
+    .muted{color:var(--muted);font-size:13px;text-align:center;padding:14px 0}
+    .scroll-x{overflow-x:auto}
+    .wa-preview{background:var(--green-soft);border:1px solid #bfe8d6;border-radius:12px;padding:12px;
+      font-size:12.5px;white-space:pre-line;margin-top:11px;line-height:1.6}
+    /* bottom nav */
+    .nav{position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1px solid var(--line);
+      display:flex;z-index:40;padding:6px 4px calc(6px + env(safe-area-inset-bottom))}
+    .nav .n{flex:1;text-align:center;padding:6px 0;color:var(--muted);cursor:pointer;font-size:11px;font-weight:500}
+    .nav .n .ic{font-size:20px;display:block;line-height:1.2}
+    .nav .n.on{color:var(--brand)}
+    .panel{display:none}.panel.active{display:block}
+    .toast{position:fixed;bottom:88px;left:50%;transform:translateX(-50%);background:#1a1d21;color:#fff;
+      padding:11px 18px;border-radius:22px;font-size:13.5px;z-index:60;display:none;box-shadow:var(--shadow)}
+    .hint{font-size:11.5px;color:var(--muted);margin-top:6px}
+  </style>
+</head>
+<body>
+  <div class="appbar">
+    <h1>订单 &amp; 抽佣记录</h1>
+    <div class="sub" id="hdr-sub">加载中…</div>
+  </div>
+
+  <div class="wrap">
+    <!-- ============ 首页 ============ -->
+    <div class="panel active" id="panel-home">
+      <div class="card">
+        <h2 id="home-month">本月概览</h2>
+        <div class="stats">
+          <div class="stat"><div class="k">本月总收入</div><div class="v"><small>RM</small> <span id="h-total">0</span></div></div>
+          <div class="stat g"><div class="k">本月给司机</div><div class="v"><small>RM</small> <span id="h-comm">0</span></div></div>
+          <div class="stat n"><div class="k">本月订单</div><div class="v" id="h-count">0</div></div>
+        </div>
+        <div class="hint" id="h-alltime"></div>
+      </div>
+      <div class="card">
+        <h2>最近订单</h2>
+        <div id="h-recent"><div class="muted">还没有订单</div></div>
+      </div>
+    </div>
+
+    <!-- ============ 录单 ============ -->
+    <div class="panel" id="panel-new">
+      <div class="card">
+        <h2>① 选 Salesman</h2>
+        <div class="combo" id="combo">
+          <div class="picked" id="picked" onclick="openDD()">
+            <div class="avatar" id="pk-av">?</div>
+            <div>
+              <div class="nm" id="pk-nm">点这里输入名字…</div>
+              <div class="meta" id="pk-meta">打字即可搜索,例如 sya</div>
+            </div>
+            <div class="chev">▾</div>
+          </div>
+          <div class="dd" id="dd">
+            <div class="search"><input id="dd-input" placeholder="输入名字搜索…" autocomplete="off"></div>
+            <div class="list" id="dd-list"></div>
+          </div>
+        </div>
+        <div class="badges" id="pk-badges" style="display:none"></div>
+      </div>
+
+      <div class="card" id="card-detail" style="display:none">
+        <h2>② Set 类型 &amp; 数量</h2>
+        <div class="seg" id="seg-set"></div>
+        <div class="row" style="margin-top:12px">
+          <div>
+            <label>单价 Price (RM) · 可改</label>
+            <input type="number" id="n-price" inputmode="decimal">
+          </div>
+          <div>
+            <label>数量 SET</label>
+            <input type="number" id="n-set" inputmode="numeric" value="1">
+          </div>
+        </div>
+        <label>Set &amp; detail 备注 (可留空)</label>
+        <input type="text" id="n-detail" placeholder="例如 9 items / special item-9">
+
+        <div class="calc">
+          <div class="c t"><div class="k">Total income</div><div class="v"><span style="font-size:15px">RM</span> <span id="n-total">0</span></div></div>
+          <div class="c m"><div class="k">司机抽佣</div><div class="v"><span style="font-size:15px">RM</span> <span id="n-comm">0</span></div></div>
+        </div>
+      </div>
+
+      <div class="card" id="card-save" style="display:none">
+        <h2>③ 保存 &amp; 通知</h2>
+        <div class="row">
+          <div>
+            <label>日期</label>
+            <input type="date" id="n-date">
+          </div>
+          <div>
+            <label>状态</label>
+            <select id="n-status"><option value="OP">OP</option><option value="PC">PC</option></select>
+          </div>
+        </div>
+        <label>Payment date (可留空)</label>
+        <input type="date" id="n-paydate">
+        <button id="btn-save">保存订单</button>
+        <button class="wa" id="btn-wa">通知司机 (WhatsApp)</button>
+        <div class="wa-preview" id="wa-preview" style="display:none"></div>
+      </div>
+    </div>
+
+    <!-- ============ 查找 ============ -->
+    <div class="panel" id="panel-records">
+      <div class="card">
+        <h2>查找订单</h2>
+        <label>关键字 (名字或 branch)</label>
+        <input type="text" id="r-kw" placeholder="留空=不限">
+        <div class="row">
+          <div><label>月份</label><select id="r-month"><option value="">全部</option></select></div>
+          <div><label>地区</label><select id="r-region"><option value="">全部</option></select></div>
+        </div>
+        <button class="ghost" id="btn-search">查找</button>
+      </div>
+      <div class="card">
+        <div id="r-result"><div class="muted">输入条件后按「查找」</div></div>
+      </div>
+    </div>
+
+    <!-- ============ 汇总 ============ -->
+    <div class="panel" id="panel-summary">
+      <div class="card">
+        <h2>月度汇总</h2>
+        <label>月份</label>
+        <select id="s-month"></select>
+        <div class="stats" style="margin-top:12px">
+          <div class="stat"><div class="k">当月总收入</div><div class="v"><small>RM</small> <span id="s-total">0</span></div></div>
+          <div class="stat g"><div class="k">给司机总额</div><div class="v"><small>RM</small> <span id="s-comm">0</span></div></div>
+        </div>
+        <div class="hint" id="s-count"></div>
+      </div>
+      <div class="card scroll-x">
+        <h2>按 Branch 细分</h2>
+        <table id="s-table"><thead><tr><th>Branch</th><th>单数</th><th>Total</th><th>抽佣</th></tr></thead><tbody></tbody></table>
+      </div>
+    </div>
+
+    <!-- ============ 管理 ============ -->
+    <div class="panel" id="panel-manage">
+      <div class="card">
+        <h2>新增 Salesman</h2>
+        <label>地区</label><select id="m-region"></select>
+        <label>Branch</label><select id="m-branch"></select>
+        <label>名字</label><input type="text" id="m-name" placeholder="例如 SYAWAN">
+        <button id="btn-add-sales">新增 Salesman</button>
+        <div class="hint">Branch 里找不到？先到下面「新增 Branch」。</div>
+      </div>
+      <div class="card">
+        <h2>新增 Branch</h2>
+        <label>地区</label><select id="mb-region"></select>
+        <label>Branch 名称</label><input type="text" id="mb-name" placeholder="例如 Perodua Bangi">
+        <button class="ghost" id="btn-add-branch">新增 Branch</button>
+      </div>
+      <div class="card">
+        <h2>抽佣规则</h2>
+        <div id="rates-list"></div>
+        <div class="hint">改完数值按对应那行的「保存」。NS 与 Johor 部署前请与客户再核对一次。</div>
+      </div>
+      <div class="card">
+        <h2>司机 WhatsApp 号码</h2>
+        <label>格式:国码+号码,不加符号 (例如 60123456789)</label>
+        <input type="text" id="m-phone" inputmode="numeric">
+        <button class="ghost" id="btn-save-phone">保存号码</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- bottom nav -->
+  <div class="nav">
+    <div class="n on" data-tab="home"><span class="ic">🏠</span>首页</div>
+    <div class="n" data-tab="new"><span class="ic">➕</span>录单</div>
+    <div class="n" data-tab="records"><span class="ic">🔍</span>查找</div>
+    <div class="n" data-tab="summary"><span class="ic">📊</span>汇总</div>
+    <div class="n" data-tab="manage"><span class="ic">⚙️</span>管理</div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    var STATE = { data:null, sel:null, setType:null };
+    var SET_TYPES = ['8 ITEMS','9 ITEMS','10 ITEMS','UMBRELLA','其他'];
+
+    function $(id){return document.getElementById(id);}
+    function toast(m){var t=$('toast');t.textContent=m;t.style.display='block';clearTimeout(t._t);t._t=setTimeout(function(){t.style.display='none';},1900);}
+    function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+    function brandOf(branch){var w=String(branch||'').trim().split(/\s+/)[0];return w?w:'—';}
+    function regionLabel(r){return (STATE.data.regionLabels&&STATE.data.regionLabels[r])||r;}
+
+    // ---------- nav ----------
+    document.querySelectorAll('.nav .n').forEach(function(n){
+      n.addEventListener('click',function(){
+        document.querySelectorAll('.nav .n').forEach(function(x){x.classList.remove('on');});
+        document.querySelectorAll('.panel').forEach(function(p){p.classList.remove('active');});
+        n.classList.add('on');
+        $('panel-'+n.dataset.tab).classList.add('active');
+        window.scrollTo(0,0);
+        if(n.dataset.tab==='home') loadDashboard();
+        if(n.dataset.tab==='records') loadMonths('r-month',true);
+        if(n.dataset.tab==='summary'){loadMonths('s-month',false,runSummary);}
+      });
+    });
+
+    // ---------- 录单:salesman 搜索 ----------
+    function openDD(){$('dd').classList.add('open');$('dd-input').value='';renderOptions('');setTimeout(function(){$('dd-input').focus();},50);}
+    function closeDD(){$('dd').classList.remove('open');}
+    document.addEventListener('click',function(e){
+      if(!$('combo').contains(e.target)) closeDD();
+    });
+    $('dd-input') && $('dd-input').addEventListener('input',function(){renderOptions(this.value);});
+
+    function renderOptions(kw){
+      kw=(kw||'').trim().toLowerCase();
+      var list=STATE.data.salesmen;
+      if(kw) list=list.filter(function(s){return s.name.toLowerCase().indexOf(kw)!==-1 || String(s.branch).toLowerCase().indexOf(kw)!==-1;});
+      list=list.slice(0,50);
+      var html=list.map(function(s){
+        return '<div class="opt" onclick="pick('+"'"+encodeURIComponent(JSON.stringify(s))+"'"+')">'+
+          '<div class="avatar" style="width:32px;height:32px;font-size:13px">'+esc(s.name.charAt(0))+'</div>'+
+          '<div><div class="nm">'+esc(s.name)+'</div><div class="meta">'+esc(s.branch)+' · '+esc(regionLabel(s.region))+'</div></div></div>';
+      }).join('');
+      html+='<div class="opt add" onclick="quickAdd()">＋ 找不到？新增一个 salesman</div>';
+      $('dd-list').innerHTML=html;
+    }
+
+    function pick(enc){
+      var s=JSON.parse(decodeURIComponent(enc));
+      STATE.sel=s;
+      $('pk-av').textContent=s.name.charAt(0);
+      $('pk-nm').textContent=s.name;
+      $('pk-meta').textContent=s.branch;
+      var b=$('pk-badges');
+      b.style.display='flex';
+      b.innerHTML='<span class="badge brand">'+esc(brandOf(s.branch))+'</span>'+
+        '<span class="badge">'+esc(s.branch)+'</span>'+
+        '<span class="badge reg">'+esc(regionLabel(s.region))+' · '+esc(s.state)+'</span>';
+      closeDD();
+      $('card-detail').style.display='block';
+      $('card-save').style.display='block';
+      renderSetSeg();
+      // 默认选第一个有价格的 set 类型
+      autoPickSet();
+      calcPreview();
+    }
+
+    function quickAdd(){
+      closeDD();
+      document.querySelectorAll('.nav .n').forEach(function(x){x.classList.remove('on');});
+      document.querySelectorAll('.panel').forEach(function(p){p.classList.remove('active');});
+      document.querySelector('.nav .n[data-tab="manage"]').classList.add('on');
+      $('panel-manage').classList.add('active');
+      window.scrollTo(0,0);
+      $('m-name').focus();
+      toast('在这里新增,保存后回录单页搜索');
+    }
+
+    function renderSetSeg(){
+      var el=$('seg-set');
+      el.innerHTML=SET_TYPES.map(function(t){
+        return '<div class="s" data-set="'+esc(t)+'" onclick="chooseSet('+"'"+esc(t)+"'"+')">'+esc(t)+'</div>';
+      }).join('');
+    }
+
+    function priceFor(branch,setType){
+      var p=STATE.data.prices[branch];
+      if(p && p[setType]!=null) return p[setType];
+      return null;
+    }
+
+    function autoPickSet(){
+      var order=['9 ITEMS','10 ITEMS','8 ITEMS','UMBRELLA'];
+      for(var i=0;i<order.length;i++){
+        if(priceFor(STATE.sel.branch,order[i])!=null){chooseSet(order[i]);return;}
+      }
+      chooseSet('其他');
+    }
+
+    function chooseSet(t){
+      STATE.setType=t;
+      document.querySelectorAll('#seg-set .s').forEach(function(s){s.classList.toggle('on',s.dataset.set===t);});
+      var p=priceFor(STATE.sel.branch,t);
+      if(p!=null){$('n-price').value=p;}
+      else if(t==='UMBRELLA'){$('n-price').value=$('n-price').value||'';}
+      // 备注默认填 set 类型(除了"其他")
+      if(t!=='其他') $('n-detail').value=t.toLowerCase();
+      calcPreview();
+    }
+
+    function itemKind(){return STATE.setType==='UMBRELLA'?'umbrella':'standard';}
+
+    function calcPreview(){
+      if(!STATE.sel) return;
+      var region=STATE.sel.region, item=itemKind();
+      var price=$('n-price').value, setQty=$('n-set').value;
+      google.script.run.withSuccessHandler(function(res){
+        $('n-total').textContent=res.total.toLocaleString();
+        $('n-comm').textContent=res.commission.toFixed(2);
+      }).previewAmounts(region,item,price,setQty);
+    }
+    ['n-price','n-set'].forEach(function(id){
+      $(id).addEventListener('input',calcPreview);
+    });
+
+    $('btn-save').addEventListener('click',function(){
+      if(!STATE.sel) return toast('请先选 salesman');
+      if(!STATE.setType) return toast('请选 set 类型');
+      var s=STATE.sel;
+      var order={
+        date:$('n-date').value, region:s.region, state:s.state, branch:s.branch, salesman:s.name,
+        item:itemKind(), setDetail:$('n-detail').value,
+        price:$('n-price').value, setQty:$('n-set').value,
+        status:$('n-status').value, paymentDate:$('n-paydate').value
+      };
+      var btn=$('btn-save');btn.textContent='保存中…';btn.disabled=true;
+      google.script.run.withSuccessHandler(function(res){
+        btn.textContent='保存订单';btn.disabled=false;
+        toast('✓ 已保存 #'+res.id+' · RM'+res.total);
+      }).withFailureHandler(function(err){
+        btn.textContent='保存订单';btn.disabled=false;toast('出错:'+err.message);
+      }).saveOrder(order);
+    });
+
+    $('btn-wa').addEventListener('click',function(){
+      if(!STATE.sel) return toast('请先选 salesman');
+      var s=STATE.sel;
+      var msg='🆕 新订单 New Order\n'+
+        '日期: '+($('n-date').value||'')+'\n'+
+        'Salesman: '+s.name+'\n'+
+        'Branch: '+s.branch+'\n'+
+        'State: '+s.state+'\n'+
+        'Detail: '+($('n-detail').value||STATE.setType)+'\n'+
+        'SET: '+$('n-set').value+'\n'+
+        'Total: RM'+$('n-total').textContent;
+      $('wa-preview').style.display='block';
+      $('wa-preview').textContent=msg;
+      var phone=STATE.data.driverPhone||'';
+      window.open('https://wa.me/'+phone+'?text='+encodeURIComponent(msg),'_blank');
+    });
+
+    // ---------- 首页 ----------
+    function loadDashboard(){
+      google.script.run.withSuccessHandler(function(d){
+        $('home-month').textContent=d.month+' 本月概览';
+        $('h-total').textContent=d.monthTotal.toLocaleString();
+        $('h-comm').textContent=d.monthCommission.toFixed(2);
+        $('h-count').textContent=d.monthCount;
+        $('h-alltime').textContent='累计: '+d.allCount+' 单 · 总收入 RM'+d.allTotal.toLocaleString()+' · 给司机 RM'+d.allCommission.toLocaleString();
+        $('h-recent').innerHTML=d.recent.length?d.recent.map(orderRow).join(''):'<div class="muted">还没有订单</div>';
+      }).getDashboard();
+    }
+    function orderRow(r,withDel){
+      var del=withDel?'<div class="del" onclick="delOrder('+r.id+',this)" title="删除">🗑️</div>':'';
+      return '<div class="ord"><div class="avatar" style="width:34px;height:34px;font-size:13px">'+esc(String(r.salesman).charAt(0))+'</div>'+
+        '<div><div class="nm">'+esc(r.salesman)+'<span class="pill '+esc(r.status)+'">'+esc(r.status)+'</span></div>'+
+        '<div class="meta">#'+esc(r.id)+' · '+esc(r.branch)+' · '+esc(r.date)+' · '+esc(r.setQty)+'set</div></div>'+
+        '<div class="amt"><div class="t">RM'+esc(r.total)+'</div><div class="m">佣 RM'+esc(r.commission)+'</div></div>'+del+'</div>';
+    }
+    window.delOrder=function(id,el){
+      if(!confirm('确定删除订单 #'+id+'？此操作无法撤销。')) return;
+      var row=el.closest('.ord'); row.style.opacity='.4';
+      google.script.run.withSuccessHandler(function(res){
+        if(res.ok){row.remove();toast('已删除 #'+id);}
+        else{row.style.opacity='1';toast('删除失败,找不到 #'+id);}
+      }).withFailureHandler(function(e){row.style.opacity='1';toast('出错:'+e.message);}).deleteOrder(id);
+    };
+
+    // ---------- 查找 ----------
+    function loadMonths(selId,withAll,cb){
+      google.script.run.withSuccessHandler(function(months){
+        var sel=$(selId);
+        var opts=(withAll?'<option value="">全部</option>':'')+months.map(function(m){return '<option value="'+m+'">'+m+'</option>';}).join('');
+        sel.innerHTML=opts;
+        if(cb) cb();
+      }).listAvailableMonths();
+    }
+    $('btn-search').addEventListener('click',function(){
+      var filters={keyword:$('r-kw').value,month:$('r-month').value,region:$('r-region').value};
+      google.script.run.withSuccessHandler(function(rows){
+        $('r-result').innerHTML=rows.length?rows.map(function(r){return orderRow(r,true);}).join(''):'<div class="muted">没有找到记录</div>';
+      }).searchOrders(filters);
+    });
+
+    // ---------- 汇总 ----------
+    function runSummary(){
+      var month=$('s-month').value;if(!month) return;
+      google.script.run.withSuccessHandler(function(res){
+        $('s-total').textContent=res.totalIncome.toLocaleString();
+        $('s-comm').textContent=res.totalCommission.toFixed(2);
+        $('s-count').textContent=res.orderCount+' 笔订单';
+        document.querySelector('#s-table tbody').innerHTML=res.byBranch.map(function(b){
+          return '<tr><td>'+esc(b.branch)+'</td><td>'+b.count+'</td><td>'+b.total+'</td><td>'+b.commission+'</td></tr>';
+        }).join('');
+      }).getMonthlySummary(month);
+    }
+    $('s-month').addEventListener('change',runSummary);
+
+    // ---------- 管理 ----------
+    function regionSelect(el){
+      el.innerHTML=Object.keys(STATE.data.regionLabels).map(function(r){
+        return '<option value="'+r+'">'+esc(STATE.data.regionLabels[r])+'</option>';
+      }).join('');
+    }
+    function branchSelect(el,region){
+      var list=(STATE.data.branchesByRegion[region]||[]).slice().sort();
+      el.innerHTML=list.map(function(b){return '<option value="'+esc(b)+'">'+esc(b)+'</option>';}).join('');
+    }
+    function stateOfRegion(region){
+      var s=STATE.data.salesmen.filter(function(x){return x.region===region;})[0];
+      if(s) return s.state;
+      return region==='kl'?'Selangor':region==='ns'?'NS':region==='johor'?'Johor':'';
+    }
+    function initManage(){
+      regionSelect($('m-region'));regionSelect($('mb-region'));
+      branchSelect($('m-branch'),$('m-region').value);
+      $('m-region').addEventListener('change',function(){branchSelect($('m-branch'),this.value);});
+      $('m-phone').value=STATE.data.driverPhone||'';
+      renderRates();
+    }
+    function renderRates(){
+      $('rates-list').innerHTML=STATE.data.rates.map(function(r,i){
+        var pct=r.Mode==='percent';
+        var label=(regionLabel(r.Region))+' / '+r.Item+(pct?' (百分比 %)':' (RM/set)');
+        var val=pct?(Number(r.Value)*100):r.Value;
+        return '<div style="margin-bottom:11px"><label>'+esc(label)+'</label><div class="row">'+
+          '<input type="number" step="0.01" id="rate-'+i+'" value="'+val+'">'+
+          '<button class="ghost sm" style="flex:0 0 auto" onclick="saveRate('+i+',\''+r.Region+'\',\''+r.Item+'\',\''+r.Mode+'\')">保存</button>'+
+          '</div></div>';
+      }).join('');
+    }
+    window.saveRate=function(i,region,item,mode){
+      var raw=Number($('rate-'+i).value);
+      var value=mode==='percent'?raw/100:raw;
+      google.script.run.withSuccessHandler(function(data){STATE.data=data;toast('规则已更新');renderRates();}).updateRate(region,item,mode,value);
+    };
+    $('btn-add-sales').addEventListener('click',function(){
+      var region=$('m-region').value, branch=$('m-branch').value, name=$('m-name').value.trim();
+      if(!branch||!name) return toast('请选 branch 并输入名字');
+      google.script.run.withSuccessHandler(function(data){
+        STATE.data=data;$('m-name').value='';toast('✓ 已新增 '+name);
+        rebuildDropdowns();
+      }).addSalesman(region,stateOfRegion(region),branch,name);
+    });
+    $('btn-add-branch').addEventListener('click',function(){
+      var region=$('mb-region').value, name=$('mb-name').value.trim();
+      if(!name) return toast('请输入 branch 名称');
+      google.script.run.withSuccessHandler(function(data){
+        STATE.data=data;$('mb-name').value='';toast('✓ 已新增 branch');
+        rebuildDropdowns();
+      }).addBranch(region,stateOfRegion(region),name);
+    });
+    $('btn-save-phone').addEventListener('click',function(){
+      var phone=$('m-phone').value.trim();
+      google.script.run.withSuccessHandler(function(){STATE.data.driverPhone=phone;toast('号码已保存');}).setDriverPhone(phone);
+    });
+
+    function rebuildDropdowns(){
+      regionSelect($('m-region'));regionSelect($('mb-region'));
+      branchSelect($('m-branch'),$('m-region').value);
+      // 查找页地区
+      $('r-region').innerHTML='<option value="">全部</option>'+Object.keys(STATE.data.regionLabels).map(function(r){return '<option value="'+r+'">'+esc(STATE.data.regionLabels[r])+'</option>';}).join('');
+    }
+
+    // ---------- boot ----------
+    google.script.run.withSuccessHandler(function(data){
+      STATE.data=data;
+      $('hdr-sub').textContent=data.salesmen.length+' 位 salesman · '+(data.userEmail||'');
+      $('n-date').valueAsDate=new Date();
+      initManage();
+      rebuildDropdowns();
+      loadDashboard();
+    }).withFailureHandler(function(err){
+      $('hdr-sub').textContent='加载失败:'+err.message;
+    }).getBootstrapData();
+  </script>
+</body>
+</html>

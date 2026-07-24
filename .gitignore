@@ -1,0 +1,13 @@
+# excel raw data (client's real sales data — never publish)
+*.xlsx
+~$*.xlsx
+
+# node
+web/node_modules/
+web/dist/
+web/.env.local
+web/*.local
+
+# os / editor
+.DS_Store
+Thumbs.db
