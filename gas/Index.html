@@ -1128,8 +1128,21 @@ function renderSettings(){
    '</div>';
 }
 function runMigrate(){
-  if(!confirm('要开始升级付款资料吗？\n\n这会把旧的 OP / PC 转成新格式。可以重复执行，不会弄坏资料。'))return;
-  toast('升级中，请稍候…','ok');
+  openSheet('<div style="font-family:var(--sf);font-size:25px;margin-bottom:3px">升级付款资料</div>'+
+   '<div class="h1s" style="margin-bottom:18px">跑一次就好</div>'+
+   '<div class="card" style="padding:14px 15px">'+
+     '<div style="font-size:13.5px;color:var(--dim);line-height:1.75">'+
+       '会做两件事：<br>'+
+       '① 把旧的 OP / PC 拆成「收款方式 + 日期 + 备注」<br>'+
+       '② <b style="color:var(--bad)">抓不到收款日期的，改成「还没收钱」</b><br><br>'+
+       '每一笔之后都能在订单页手动改回来，重复跑也不会重复处理。</div>'+
+   '</div>'+
+   '<button class="btn p" onclick="doMigrate()">确定，开始升级</button>'+
+   '<div style="height:9px"></div><button class="btn o" onclick="closeSheet()">取消</button>');
+}
+function doMigrate(){
+  openSheet('<div class="load"><div class="spin"></div></div>'+
+    '<div style="text-align:center;color:var(--dim);font-size:14px">升级中，1000 多笔要一点时间…</div>');
   call('migratePayment',[AUTH]).then(function(r){
     if(!r.ok){toast(r.msg,'bad');return}
     var s=r.stat;
