@@ -4,7 +4,7 @@
 
 | 档案 | 内容 |
 |---|---|
-| `Code.gs` | 后端：登入、下单、报表、作废/编辑、帐号管理、一次性安装器 `INSTALL()` |
+| `Code.js` | 后端：登入、下单、报表、作废/编辑、帐号管理、一次性安装器 `INSTALL()` |
 | `Index.html` | 整个 App 前端（HTML + CSS + JS 单档） |
 | `appsscript.json` | Apps Script manifest（时区 Asia/Singapore、V8、Web App 设定） |
 | `.clasp.json` | 指向哪个 Apps Script 专案（scriptId） |
@@ -22,7 +22,7 @@ npm install -g @google/clasp@2.4.2
 clasp login                    # 只需一次
 cd gas
 clasp pull                     # 先拉，确认跟线上一致（git diff 应该是空的）
-# ...改 Code.gs / Index.html...
+# ...改 Code.js / Index.html...
 git commit -am "改了什么" && git push
 # Actions 会自动 push + deploy
 ```
