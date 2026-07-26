@@ -1,0 +1,66 @@
+name: Deploy Apps Script
+
+# 改动 gas/ 里的档案并 push 到 main → 自动推上 Apps Script 并更新线上部署
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'gas/**'
+      - '.github/workflows/deploy-apps-script.yml'
+  workflow_dispatch:        # 也可以在 Actions 页手动跑
+
+concurrency:
+  group: deploy-apps-script
+  cancel-in-progress: false   # 部署不要互相取消，排队执行
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # 语法先过一遍，坏的程式不要推上去
+      - name: 语法检查
+        run: |
+          cp gas/Code.gs /tmp/Code.js
+          node --check /tmp/Code.js
+          node -e "
+            const fs=require('fs');
+            const html=fs.readFileSync('gas/Index.html','utf8');
+            const m=html.match(/<script>([\s\S]*)<\/script>/);
+            if(!m){console.error('Index.html 找不到 <script> 区块');process.exit(1)}
+            fs.writeFileSync('/tmp/Index.js',m[1]);
+          "
+          node --check /tmp/Index.js
+          echo "语法 OK"
+
+      - name: 安装 clasp
+        run: npm install -g @google/clasp@2.4.2
+
+      - name: 写入授权
+        run: |
+          printf '%s' "$CLASPRC_JSON" > ~/.clasprc.json
+          test -s ~/.clasprc.json || { echo "CLASPRC_JSON secret 是空的"; exit 1; }
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+
+      - name: 推上 Apps Script
+        working-directory: gas
+        run: clasp push --force
+
+      # 更新「同一个」部署 → 网址不会变
+      - name: 更新线上部署
+        working-directory: gas
+        run: |
+          clasp deploy \
+            --deploymentId "$DEPLOYMENT_ID" \
+            --description "GitHub ${GITHUB_SHA::7} — ${GITHUB_ACTOR}"
+        env:
+          DEPLOYMENT_ID: AKfycbwv-QmaPM0i-B1ud8hWUAtbtz0wtQlpuzwmMIY1l7L2e7PRDurbEblJrQI9eVHmp1Sr8w
+
+      - name: 完成
+        run: echo "已部署 → https://v-p-trading.vercel.app"
