@@ -1,0 +1,852 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>V&amp;P TRADING</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500;600&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#08080A; --bg2:#0E0E11; --card:rgba(255,255,255,.032); --card2:rgba(255,255,255,.055);
+  --line:rgba(255,255,255,.075); --line2:rgba(255,255,255,.14);
+  --gold:#C9A227; --gold2:#E7CE8C; --goldsoft:rgba(201,162,39,.14);
+  --txt:#F7F6F3; --dim:#B9B8B1; --dim2:#918F87;
+  --ok:#4BC08B; --warn:#E0A44B; --bad:#E2685F;
+  --r:18px; --sf:'Cormorant Garamond',Georgia,serif;
+  --safe-b:env(safe-area-inset-bottom,0px);
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0;height:100%}
+body{
+  background:var(--bg); color:var(--txt);
+  font:400 16px/1.55 'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  overflow-x:hidden; letter-spacing:-.01em;
+}
+body::before{
+  content:''; position:fixed; inset:0; pointer-events:none; z-index:0;
+  background:
+    radial-gradient(900px 500px at 80% -10%, rgba(201,162,39,.10), transparent 60%),
+    radial-gradient(700px 500px at -10% 100%, rgba(201,162,39,.055), transparent 62%);
+}
+#app{position:relative;z-index:1;min-height:100%}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:9px}
+button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit}
+button{cursor:pointer;border:none;background:none}
+input,select{outline:none}
+
+/* ============ LOGIN ============ */
+.login{min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:34px 26px;text-align:center}
+.mark{font-family:var(--sf);font-size:52px;font-weight:500;letter-spacing:.14em;line-height:1;
+  background:linear-gradient(160deg,#FBF3DC 0%,var(--gold2) 42%,var(--gold) 100%);
+  -webkit-background-clip:text;background-clip:text;color:transparent}
+.mark .amp{font-style:italic;font-weight:400;padding:0 2px}
+.rule{width:64px;height:1px;margin:20px auto;background:linear-gradient(90deg,transparent,var(--gold),transparent);opacity:.75}
+.sub{color:var(--dim);font-size:12px;letter-spacing:.36em;text-transform:uppercase;margin-bottom:46px}
+.pinbox{display:flex;gap:13px;margin-bottom:30px}
+.pindot{width:13px;height:13px;border-radius:50%;border:1px solid var(--line2);transition:.28s}
+.pindot.on{background:var(--gold);border-color:var(--gold);box-shadow:0 0 16px rgba(201,162,39,.6);transform:scale(1.12)}
+.pad{display:grid;grid-template-columns:repeat(3,72px);gap:15px}
+.key{height:72px;border-radius:50%;border:1px solid var(--line);background:var(--card);
+  font-size:23px;font-weight:300;transition:.16s;display:flex;align-items:center;justify-content:center}
+.key:active{background:var(--goldsoft);border-color:var(--gold);transform:scale(.93)}
+.key.fn{font-size:13px;letter-spacing:.13em;color:var(--dim);border-color:transparent;background:none}
+.err{color:var(--bad);font-size:13.5px;margin-top:20px;min-height:18px;letter-spacing:.02em}
+.shake{animation:sh .42s}
+@keyframes sh{0%,100%{transform:translateX(0)}20%{transform:translateX(-9px)}40%{transform:translateX(9px)}60%{transform:translateX(-5px)}80%{transform:translateX(5px)}}
+
+/* ============ SHELL ============ */
+.top{position:sticky;top:0;z-index:40;padding:calc(14px + env(safe-area-inset-top,0px)) 20px 13px;
+  display:flex;align-items:center;justify-content:space-between;
+  background:linear-gradient(180deg,rgba(8,8,10,.96),rgba(8,8,10,.72) 70%,transparent);
+  backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px)}
+.top .wm{font-family:var(--sf);font-size:21px;letter-spacing:.15em;font-weight:500;
+  background:linear-gradient(150deg,#FBF3DC,var(--gold2) 50%,var(--gold));-webkit-background-clip:text;background-clip:text;color:transparent}
+.who{display:flex;align-items:center;gap:9px;font-size:12.5px;color:var(--dim);letter-spacing:.06em}
+.chipr{padding:5px 11px;border:1px solid var(--line);border-radius:99px;font-size:10.5px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--gold2);background:var(--goldsoft)}
+.lo{padding:6px 12px;border:1px solid var(--line2);border-radius:99px;font-size:12px;color:var(--txt);
+  letter-spacing:.1em;transition:.2s;background:var(--card)}
+.lo:active{border-color:var(--bad);color:var(--bad)}
+.wrap{padding:6px 18px calc(112px + var(--safe-b))}
+.view{display:none;animation:fade .38s cubic-bezier(.22,1,.36,1)}
+.view.on{display:block}
+@keyframes fade{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:none}}
+.h1{font-family:var(--sf);font-size:31px;font-weight:400;letter-spacing:.01em;margin:14px 0 3px}
+.h1s{color:var(--dim);font-size:12px;letter-spacing:.26em;text-transform:uppercase;margin-bottom:24px}
+
+/* ============ NAV ============ */
+.nav{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(14px + var(--safe-b));z-index:50;
+  display:flex;gap:2px;padding:5px;border-radius:99px;border:1px solid var(--line);
+  background:rgba(16,16,19,.86);backdrop-filter:blur(26px);-webkit-backdrop-filter:blur(26px);
+  box-shadow:0 14px 44px rgba(0,0,0,.6)}
+.nb{padding:11px 18px;border-radius:99px;font-size:14px;color:var(--dim);transition:.24s;white-space:nowrap;letter-spacing:.03em}
+.nb.on{color:#151206;background:linear-gradient(140deg,var(--gold2),var(--gold));font-weight:600;
+  box-shadow:0 3px 14px rgba(201,162,39,.34)}
+
+/* ============ CARDS / FORM ============ */
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:18px;margin-bottom:14px}
+.lbl{font-size:11.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--dim);margin-bottom:10px;display:block}
+.inp{width:100%;padding:15px 16px;border-radius:13px;border:1px solid var(--line2);
+  background:rgba(255,255,255,.045);font-size:16.5px;transition:.22s;letter-spacing:.01em}
+.inp:focus{border-color:var(--gold);background:rgba(201,162,39,.05);box-shadow:0 0 0 3px rgba(201,162,39,.09)}
+.inp::placeholder{color:var(--dim2)}
+select.inp{appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--dim) 50%),linear-gradient(135deg,var(--dim) 50%,transparent 50%);
+  background-position:calc(100% - 19px) 22px,calc(100% - 14px) 22px;background-size:5px 5px;background-repeat:no-repeat}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{padding:10px 15px;border-radius:11px;border:1px solid var(--line);background:var(--card);
+  font-size:14.5px;color:var(--txt);transition:.2s;letter-spacing:.01em}
+.chip.on{border-color:var(--gold);background:var(--goldsoft);color:var(--gold2);font-weight:600}
+.chip small{display:block;font-size:11.5px;opacity:.8;margin-top:2px;font-weight:400}
+.row{display:flex;gap:11px}.row>*{flex:1}
+.ac{position:relative}
+.aclist{position:absolute;top:calc(100% + 7px);left:0;right:0;z-index:60;max-height:242px;overflow-y:auto;
+  background:#141417;border:1px solid var(--line2);border-radius:14px;box-shadow:0 20px 50px rgba(0,0,0,.66);padding:5px}
+.aci{padding:12px 13px;border-radius:9px;cursor:pointer;font-size:15.5px;transition:.13s}
+.aci:hover,.aci.hl{background:var(--goldsoft);color:var(--gold2)}
+.aci b{font-weight:600}.aci span{color:var(--dim);font-size:12.5px;display:block;margin-top:2px}
+.step{display:flex;align-items:center;gap:0;border:1px solid var(--line);border-radius:13px;overflow:hidden}
+.step button{width:52px;height:50px;font-size:21px;font-weight:300;color:var(--dim);transition:.16s;background:rgba(255,255,255,.02)}
+.step button:active{background:var(--goldsoft);color:var(--gold)}
+.step input{flex:1;border:none;background:none;text-align:center;font-size:20px;font-weight:500;padding:0;width:100%}
+
+/* ============ SUMMARY ============ */
+.sum{border-radius:var(--r);padding:20px;margin-bottom:14px;
+  background:linear-gradient(155deg,rgba(201,162,39,.14),rgba(201,162,39,.03) 55%,transparent);
+  border:1px solid rgba(201,162,39,.3)}
+.sumrow{display:flex;justify-content:space-between;align-items:baseline;padding:9px 0}
+.sumrow+.sumrow{border-top:1px solid rgba(255,255,255,.05)}
+.sumrow .k{color:var(--dim);font-size:14px;letter-spacing:.03em}
+.sumrow .v{font-size:20px;font-weight:500;font-variant-numeric:tabular-nums}
+.sumrow.big .v{font-family:var(--sf);font-size:33px;font-weight:500;color:var(--gold2)}
+.cur{font-size:12.5px;color:var(--dim);margin-right:3px;font-weight:400}
+
+/* ============ BUTTONS ============ */
+.btn{width:100%;padding:17px;border-radius:14px;font-size:16px;font-weight:600;letter-spacing:.04em;transition:.2s}
+.btn.p{background:linear-gradient(140deg,var(--gold2),var(--gold));color:#141105;box-shadow:0 5px 22px rgba(201,162,39,.3)}
+.btn.p:active{transform:scale(.985);box-shadow:0 2px 10px rgba(201,162,39,.25)}
+.btn.g{background:linear-gradient(140deg,#3ED07E,#1FA45E);color:#04220F;box-shadow:0 5px 22px rgba(37,190,110,.26)}
+.btn.o{border:1px solid var(--line2);background:var(--card);color:var(--txt)}
+.btn.danger{border:1px solid rgba(226,104,95,.42);background:rgba(226,104,95,.1);color:var(--bad)}
+.btn.danger:active{background:rgba(226,104,95,.2)}
+.btn[disabled]{opacity:.32;pointer-events:none}
+
+/* ============ STATS ============ */
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:11px;margin-bottom:14px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:17px}
+.stat .k{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);margin-bottom:10px;font-weight:500}
+.stat .v{font-family:var(--sf);font-size:32px;font-weight:500;line-height:1;font-variant-numeric:tabular-nums}
+.stat .v small{font-size:13px;color:var(--dim);font-family:'Inter';margin-right:3px;font-weight:400}
+.stat .v .unit{font-family:'Inter';font-size:12.5px;color:var(--dim);font-weight:400;margin-left:5px;letter-spacing:.06em}
+.stat.hi{background:linear-gradient(155deg,rgba(201,162,39,.15),rgba(201,162,39,.02));border-color:rgba(201,162,39,.3)}
+.stat.hi .v{color:var(--gold2)}
+.bar{display:flex;align-items:center;gap:11px;padding:9px 0}
+.bar+.bar{border-top:1px solid rgba(255,255,255,.04)}
+.bar .n{width:88px;font-size:13px;color:var(--dim);flex-shrink:0;letter-spacing:.02em}
+.bar .t{flex:1;height:6px;border-radius:99px;background:rgba(255,255,255,.055);overflow:hidden}
+.bar .f{height:100%;border-radius:99px;background:linear-gradient(90deg,var(--gold),var(--gold2));transition:width .8s cubic-bezier(.22,1,.36,1)}
+.bar .a{width:78px;text-align:right;font-size:13.5px;font-variant-numeric:tabular-nums;color:var(--txt)}
+
+/* ============ LIST ============ */
+.oi{background:var(--card);border:1px solid var(--line);border-radius:15px;padding:14px 15px;margin-bottom:9px;transition:.18s}
+.oi.sel{border-color:var(--gold);background:var(--goldsoft)}
+.oi .r1{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.oi .b{font-size:15.5px;font-weight:600;letter-spacing:.01em}
+.oi .s{font-size:12.5px;color:var(--dim);margin-top:3px}
+.oi .amt{font-size:16.5px;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
+.oi .r2{display:flex;gap:7px;margin-top:11px;align-items:center;flex-wrap:wrap}
+.tag{font-size:11px;padding:4px 9px;border-radius:7px;letter-spacing:.06em;text-transform:uppercase;font-weight:600}
+.tag.op{background:rgba(224,164,75,.14);color:var(--warn)}
+.tag.paid{background:rgba(75,192,139,.14);color:var(--ok)}
+.tag.pend{background:rgba(226,104,95,.13);color:var(--bad)}
+.tag.dlv{background:rgba(255,255,255,.06);color:var(--dim)}
+.tag.set{background:rgba(255,255,255,.05);color:var(--dim)}
+
+/* ============ MISC ============ */
+.empty{text-align:center;padding:56px 20px;color:var(--dim);font-size:15px}
+.empty .ic{font-family:var(--sf);font-size:42px;opacity:.28;margin-bottom:12px}
+.hint{background:rgba(75,192,139,.1);border:1px solid rgba(75,192,139,.3);border-radius:12px;
+  padding:12px 15px;font-size:13.5px;color:var(--ok);margin-bottom:14px;line-height:1.55}
+.newbox{background:rgba(201,162,39,.08);border:1px dashed rgba(201,162,39,.42);border-radius:14px;padding:14px}
+.load{display:flex;align-items:center;justify-content:center;padding:52px}
+.spin{width:26px;height:26px;border:2px solid rgba(201,162,39,.18);border-top-color:var(--gold);border-radius:50%;animation:sp .75s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+.toast{position:fixed;left:50%;transform:translateX(-50%) translateY(110px);bottom:calc(88px + var(--safe-b));z-index:200;
+  padding:14px 24px;border-radius:99px;background:#22222A;border:1px solid var(--line2);font-size:14.5px;
+  box-shadow:0 14px 40px rgba(0,0,0,.62);transition:transform .38s cubic-bezier(.22,1,.36,1);max-width:88vw;text-align:center}
+.toast.on{transform:translateX(-50%) translateY(0)}
+.toast.ok{border-color:rgba(75,192,139,.45)}.toast.bad{border-color:rgba(226,104,95,.45)}
+.sheet{position:fixed;inset:0;z-index:150;display:none}
+.sheet.on{display:block}
+.sheet .bd{position:absolute;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(5px);animation:fade .3s}
+.sheet .pn{position:absolute;left:0;right:0;bottom:0;background:#101013;border-top:1px solid var(--line2);
+  border-radius:26px 26px 0 0;padding:11px 20px calc(26px + var(--safe-b));max-height:88vh;overflow-y:auto;
+  animation:up .42s cubic-bezier(.22,1,.36,1)}
+@keyframes up{from{transform:translateY(100%)}to{transform:none}}
+.grab{width:34px;height:4px;border-radius:99px;background:var(--line2);margin:0 auto 20px}
+.mono{font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:13px;line-height:1.7;white-space:pre-wrap;
+  background:rgba(0,0,0,.42);border:1px solid var(--line);border-radius:13px;padding:15px;color:var(--dim);max-height:230px;overflow-y:auto}
+.seg{display:flex;gap:3px;padding:3px;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid var(--line);margin-bottom:15px}
+.seg button{flex:1;padding:10px;border-radius:9px;font-size:14px;color:var(--dim);transition:.2s;letter-spacing:.02em}
+.seg button.on{background:var(--card2);color:var(--gold2);font-weight:600}
+.ok-ic{width:64px;height:64px;margin:6px auto 18px;border-radius:50%;
+  background:linear-gradient(145deg,rgba(75,192,139,.22),rgba(75,192,139,.06));
+  border:1px solid rgba(75,192,139,.42);display:flex;align-items:center;justify-content:center;
+  font-size:29px;color:var(--ok);animation:pop .5s cubic-bezier(.34,1.56,.64,1)}
+@keyframes pop{from{transform:scale(.3);opacity:0}to{transform:none;opacity:1}}
+@media(min-width:760px){.wrap{max-width:640px;margin:0 auto}.grid2{grid-template-columns:repeat(4,1fr)}}
+</style>
+</head>
+<body>
+<div id="app"><div class="load"><div class="spin"></div></div></div>
+<div class="toast" id="toast"></div>
+
+<!-- sheet -->
+<div class="sheet" id="sheet"><div class="bd" onclick="closeSheet()"></div>
+  <div class="pn"><div class="grab"></div><div id="sheetBody"></div></div></div>
+
+<script>
+/* ================= 状态 ================= */
+var S={user:null,boot:null,view:'order',sel:{},dash:null,orders:[],month:0};
+var F={ // 表单
+  salesman:'',branch:'',brand:'',state:'',region:'',setType:'',price:0,profit:0,qty:1,
+  pay:'OP',note:'',ovTotal:'',ovMine:'',ovFee:''
+};
+var MONTHS=['','一月','二月','三月','四月','五月','六月','七月','八月','九月','十月','十一月','十二月'];
+
+/* ================= 后端桥接（本地预览有 mock） ================= */
+var HAS_GS = (typeof google!=='undefined' && google.script && google.script.run);
+function call(fn,args){
+  return new Promise(function(res,rej){
+    if(HAS_GS){
+      google.script.run.withSuccessHandler(res).withFailureHandler(rej)[fn].apply(null,args||[]);
+    } else if(window.MOCK && MOCK[fn]){
+      setTimeout(function(){res(MOCK[fn].apply(null,args||[]))},220);
+    } else rej(new Error('后端未连接：'+fn));
+  });
+}
+function rm(n){return (Math.round(n*100)/100).toLocaleString('en-MY',{minimumFractionDigits:2,maximumFractionDigits:2})}
+function rm0(n){return Math.round(n).toLocaleString('en-MY')}
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+function toast(m,t){var e=document.getElementById('toast');e.textContent=m;e.className='toast on '+(t||'');
+  clearTimeout(e._t);e._t=setTimeout(function(){e.className='toast '+(t||'')},2600)}
+function openSheet(h){document.getElementById('sheetBody').innerHTML=h;document.getElementById('sheet').className='sheet on'}
+function closeSheet(){document.getElementById('sheet').className='sheet'}
+
+/* ================= 登入 ================= */
+var PIN='', BUSY=false, AUTH='';
+function renderLogin(){
+  document.getElementById('app').innerHTML=
+   '<div class="login"><div class="mark">V<span class="amp">&amp;</span>P</div>'+
+   '<div class="rule"></div><div class="sub">Trading</div>'+
+   '<div class="pinbox" id="pb">'+[0,1,2,3].map(function(){return '<div class="pindot"></div>'}).join('')+'</div>'+
+   '<div class="pad">'+
+     [1,2,3,4,5,6,7,8,9].map(function(n){return '<button class="key" onclick="pinPush('+n+')">'+n+'</button>'}).join('')+
+     '<button class="key fn" onclick="pinClear()">清除</button>'+
+     '<button class="key" onclick="pinPush(0)">0</button>'+
+     '<button class="key fn" onclick="pinBack()">⌫</button>'+
+   '</div>'+
+   '<button class="btn p" id="pinGo" disabled onclick="doLogin()" style="max-width:246px;margin-top:24px">确认</button>'+
+   '<div class="err" id="perr"></div></div>';
+  pinDots();
+}
+function pinDots(){
+  var d=document.querySelectorAll('#pb .pindot');
+  for(var i=0;i<4;i++)d[i].className='pindot'+(i<PIN.length?' on':'');
+  var g=document.getElementById('pinGo');
+  if(g&&!BUSY){ if(PIN.length===4)g.removeAttribute('disabled'); else g.setAttribute('disabled',''); }
+}
+function pinPush(n){if(BUSY||PIN.length>=4)return;PIN+=n;pinDots()}
+function pinBack(){if(BUSY)return;PIN=PIN.slice(0,-1);pinDots()}
+function pinClear(){if(BUSY)return;PIN='';pinDots();document.getElementById('perr').textContent=''}
+function pinBusy(on,txt){
+  BUSY=on;
+  var g=document.getElementById('pinGo'); if(!g)return;
+  if(on){g.setAttribute('disabled','');g.innerHTML='<span class="spin" style="width:17px;height:17px;display:inline-block;vertical-align:-3px;margin-right:9px"></span>'+(txt||'验证中…')}
+  else{g.textContent='确认';pinDots()}
+}
+function doLogin(){
+  if(BUSY||PIN.length<4)return;
+  document.getElementById('perr').textContent='';
+  pinBusy(true,'验证中…');
+  var t0=Date.now();
+  var tick=setTimeout(function(){pinBusy(true,'载入资料…')},1200);
+  call('loginAndBoot',[PIN]).then(function(r){
+    clearTimeout(tick);
+    if(!r.ok){
+      pinBusy(false);
+      document.getElementById('perr').textContent=r.msg;
+      document.querySelector('.pad').classList.add('shake');
+      setTimeout(function(){document.querySelector('.pad').classList.remove('shake');pinClear()},450);
+      return;
+    }
+    S.user=r.user; S.boot=r.boot; F.pay=r.boot.defaultPay||'OP';
+    S.view=(r.user.role==='driver')?'driver':'order';
+    AUTH=PIN; BUSY=false; PIN=''; renderApp();
+  }).catch(function(e){
+    clearTimeout(tick); pinBusy(false);
+    document.getElementById('perr').textContent=String(e.message||e);
+  });
+}
+function logout(){
+  if(!confirm('确定登出？'))return;
+  S.user=null;S.boot=null;S.orders=[];S.dash=null;S.sel={};S.month=0;PIN='';BUSY=false;AUTH='';S.users=null;
+  F.salesman='';F.branch='';F.brand='';F.state='';F.region='';F.setType='';F.price=0;F.profit=0;F.qty=1;
+  F.note='';F.ovTotal='';F.ovMine='';F.ovFee='';
+  renderLogin();
+}
+
+/* ================= 主壳 ================= */
+function renderApp(){
+  var role=S.user.role;
+  var tabs=[];
+  if(role==='driver'){tabs=[['driver','送货单']];}
+  else{
+    tabs=[['order','下单'],['list','订单'],['driver','送货'],['dash','报表']];
+    if(role==='admin')tabs.push(['set','设定']);
+  }
+  document.getElementById('app').innerHTML=
+   '<div class="top"><div class="wm">V&amp;P TRADING</div>'+
+     '<div class="who"><span>'+esc(S.user.name)+'</span><span class="chipr">'+esc(role)+'</span>'+
+     '<button class="lo" onclick="logout()" title="登出">登出</button></div></div>'+
+   '<div class="wrap">'+
+     '<div class="view'+(S.view==='order'?' on':'')+'" id="v-order"></div>'+
+     '<div class="view'+(S.view==='list'?' on':'')+'" id="v-list"></div>'+
+     '<div class="view'+(S.view==='dash'?' on':'')+'" id="v-dash"></div>'+
+     '<div class="view'+(S.view==='driver'?' on':'')+'" id="v-driver"></div>'+
+     '<div class="view'+(S.view==='set'?' on':'')+'" id="v-set"></div>'+
+   '</div>'+
+   '<div class="nav">'+tabs.map(function(t){
+      return '<button class="nb'+(S.view===t[0]?' on':'')+'" onclick="go(\''+t[0]+'\')">'+t[1]+'</button>'}).join('')+'</div>';
+  go(S.view,true);
+}
+function go(v,keep){
+  S.view=v;
+  document.querySelectorAll('.view').forEach(function(e){e.className='view'});
+  document.getElementById('v-'+v).className='view on';
+  document.querySelectorAll('.nb').forEach(function(b){
+    b.className='nb'+(b.getAttribute('onclick').indexOf("'"+v+"'")>=0?' on':'')});
+  if(v==='order')renderOrder();
+  if(v==='list')loadList();
+  if(v==='dash')loadDash();
+  if(v==='driver')loadDriver();
+  if(v==='set')loadSettings();
+}
+/** admin 与 partner 权限相同（夫妻档），只有 admin 能管帐号 */
+function boss(){return S.user.role==='admin'||S.user.role==='partner'}
+
+/* ================= 下单 ================= */
+function renderOrder(){
+  var b=S.boot;
+  var types=Object.keys(b.setTypes);
+  var tiers=F.setType?b.setTypes[F.setType]:[];
+  var branches=F.salesman&&b.people[F.salesman]?b.people[F.salesman]:[];
+  var total=F.qty*F.price, mine=F.qty*F.profit, fee=calcFee();
+  var ready=F.salesman&&F.branch&&F.setType&&F.price>0&&F.qty>0;
+
+  document.getElementById('v-order').innerHTML=
+  '<div class="h1">新订单</div><div class="h1s">New Order</div>'+
+
+  '<div class="card"><label class="lbl">销售员</label>'+
+   '<div class="ac"><input class="inp" id="smq" placeholder="输入名字…" autocomplete="off" '+
+     'value="'+esc(F.salesman)+'" oninput="acSearch(this.value)" onfocus="acSearch(this.value)">'+
+     '<div id="aclist"></div></div>'+
+   (!branches.length&&F.salesman.trim()?('<div style="margin-top:14px"><div class="newbox">'+
+      '<div style="font-size:14px;color:var(--dim);margin-bottom:11px">名单里没有「<b style="color:var(--txt)">'+esc(F.salesman.trim())+'</b>」</div>'+
+      '<button class="btn p" style="padding:13px;font-size:15px" onclick="askNewSalesman()">＋ 新增这个销售员</button></div></div>'):'')+
+   (branches.length?('<div style="margin-top:14px"><label class="lbl">Branch'+
+      (branches.length>1?' <span style="color:var(--gold2);letter-spacing:0;text-transform:none;font-size:10px">· '+branches.length+' 间，请选</span>':'')+
+      '</label><div class="chips">'+branches.map(function(x,i){
+       return '<button class="chip'+(F.branch===x.branch?' on':'')+'" onclick="pickBranch('+i+')">'+
+         esc(x.branch)+'<small>'+esc(x.state)+' · '+esc(x.brand)+'</small></button>'}).join('')+'</div></div>'):'')+
+  '</div>'+
+
+  '<div class="card"><label class="lbl">Set</label>'+
+   '<div class="chips">'+types.map(function(t){
+     return '<button class="chip'+(F.setType===t?' on':'')+'" onclick="pickSet(\''+esc(t).replace(/'/g,"\\'")+'\')">'+esc(t)+'</button>'}).join('')+
+   '</div>'+
+   (tiers.length?('<div style="margin-top:15px"><label class="lbl">售价 / set</label><div class="chips">'+
+     tiers.map(function(t,i){return '<button class="chip'+(F.price===t.price?' on':'')+'" onclick="pickPrice('+i+')">RM '+t.price+
+       '<small>赚 RM'+t.profit+'</small></button>'}).join('')+'</div></div>'):'')+
+  '</div>'+
+
+  '<div class="card"><label class="lbl">数量（set）</label>'+
+   '<div class="step"><button onclick="qty(-1)">−</button>'+
+   '<input type="number" inputmode="numeric" value="'+F.qty+'" oninput="F.qty=Math.max(0,parseInt(this.value)||0);softSum()">'+
+   '<button onclick="qty(1)">+</button></div>'+
+   '<div style="margin-top:14px"><label class="lbl">付款状态</label><div class="chips">'+
+     b.payOptions.map(function(p){return '<button class="chip'+(F.pay===p?' on':'')+'" onclick="F.pay=\''+p+'\';renderOrder()">'+p+'</button>'}).join('')+
+   '</div></div>'+
+  '</div>'+
+
+  '<div class="sum" id="sumbox">'+sumHtml(total,mine,fee)+'</div>'+
+  '<button class="btn o" style="margin-bottom:10px" onclick="advSheet()">进阶：手动改金额 / 备注</button>'+
+  '<button class="btn p" '+(ready?'':'disabled')+' onclick="submit()">确认下单</button>';
+  acRender([]);
+}
+function sumHtml(total,mine,fee){
+  var admin=boss();
+  return '<div class="sumrow big"><span class="k">总额</span><span class="v"><span class="cur">RM</span>'+rm(F.ovTotal!==''?F.ovTotal:total)+'</span></div>'+
+   (admin?'<div class="sumrow"><span class="k">我的利润</span><span class="v" style="color:var(--ok)"><span class="cur">RM</span>'+rm(F.ovMine!==''?F.ovMine:mine)+'</span></div>':'')+
+   '<div class="sumrow"><span class="k">司机抽成</span><span class="v" style="color:var(--warn)"><span class="cur">RM</span>'+rm(F.ovFee!==''?F.ovFee:fee)+'</span></div>';
+}
+function softSum(){
+  var t=F.qty*F.price,m=F.qty*F.profit,f=calcFee();
+  var el=document.getElementById('sumbox'); if(el)el.innerHTML=sumHtml(t,m,f);
+  var btn=document.querySelector('.btn.p');
+  if(btn){var ready=F.salesman&&F.branch&&F.setType&&F.price>0&&F.qty>0;
+    if(ready)btn.removeAttribute('disabled');else btn.setAttribute('disabled','')}
+}
+function calcFee(){ // 前端即时预览，提交时后端会重算
+  var st=(F.state||'').toUpperCase(), rg=(F.region||'').toUpperCase();
+  if(rg==='SOUTH')return 0;
+  if(st==='NS'||st==='N9')return Math.round(F.qty*F.price*0.10*100)/100;
+  var umb=(F.setType||'').toUpperCase().indexOf('UMBRELLA')>=0;
+  return Math.round(F.qty*(umb?1:2.5)*100)/100;
+}
+function qty(d){F.qty=Math.max(0,F.qty+d);
+  var i=document.querySelector('.step input'); if(i)i.value=F.qty; softSum()}
+
+/* --- 自动补全 --- */
+var acHl=-1, acCur=[];
+function acSearch(q){
+  F.salesman=q.toUpperCase();
+  var Q=q.trim().toUpperCase();
+  if(!Q){acRender([]);return}
+  var names=Object.keys(S.boot.people);
+  var starts=[],inc=[];
+  names.forEach(function(n){ if(n.indexOf(Q)===0)starts.push(n); else if(n.indexOf(Q)>=0)inc.push(n) });
+  acCur=starts.concat(inc).slice(0,9); acHl=-1; acRender(acCur);
+  // 唯一匹配 → 自动带出
+  var ex=S.boot.people[Q];
+  if(ex){ setPerson(Q, ex[0]); }
+}
+function acRender(list){
+  var el=document.getElementById('aclist'); if(!el)return;
+  if(!list.length){el.innerHTML='';return}
+  el.innerHTML='<div class="aclist">'+list.map(function(n,i){
+    var p=S.boot.people[n], b=p[0];
+    return '<div class="aci'+(i===acHl?' hl':'')+'" onmousedown="acPick(\''+n.replace(/'/g,"\\'")+'\')">'+
+      '<b>'+esc(n)+'</b><span>'+esc(b.branch)+(p.length>1?' 等 '+p.length+' 间':'')+'</span></div>'}).join('')+'</div>';
+}
+function acPick(n){ setPerson(n,S.boot.people[n][0]); renderOrder(); }
+function setPerson(n,b){ F.salesman=n; F.branch=b.branch; F.brand=b.brand; F.state=b.state; F.region=b.region; }
+function pickBranch(i){var b=S.boot.people[F.salesman][i];
+  F.branch=b.branch;F.brand=b.brand;F.state=b.state;F.region=b.region;renderOrder()}
+function pickSet(t){F.setType=t;var ts=S.boot.setTypes[t];
+  if(ts&&ts.length===1){F.price=ts[0].price;F.profit=ts[0].profit}else{F.price=0;F.profit=0}renderOrder()}
+function pickPrice(i){var t=S.boot.setTypes[F.setType][i];F.price=t.price;F.profit=t.profit;renderOrder()}
+
+/* --- 新增销售员 / 新分行 --- */
+var NB={mode:'old',branch:'',state:''};
+function askNewSalesman(){
+  NB={mode:'old',branch:'',state:''};
+  drawNewSalesman();
+}
+function drawNewSalesman(){
+  var name=F.salesman.trim().toUpperCase();
+  var bs=S.boot.branches;
+  openSheet('<div style="font-family:var(--sf);font-size:26px;margin-bottom:3px">新增销售员</div>'+
+   '<div class="h1s" style="margin-bottom:20px">'+esc(name)+'</div>'+
+   '<div class="seg"><button class="'+(NB.mode==='old'?'on':'')+'" onclick="nbMode(\'old\')">选现有分行</button>'+
+     '<button class="'+(NB.mode==='new'?'on':'')+'" onclick="nbMode(\'new\')">开新分行</button></div>'+
+   (NB.mode==='old'?(
+     '<label class="lbl">搜寻分行</label>'+
+     '<input class="inp" id="nbq" placeholder="打几个字，例如 KAJANG" oninput="nbFilter(this.value)" autocomplete="off">'+
+     '<div style="height:11px"></div><div class="chips" id="nblist" style="max-height:210px;overflow-y:auto">'+
+       nbOptions(bs.slice(0,14))+'</div>'
+   ):(
+     '<label class="lbl">新分行名字</label>'+
+     '<input class="inp" id="nbName" placeholder="例如 PERODUA SEPANG" value="'+esc(NB.branch)+'" oninput="NB.branch=this.value">'+
+     '<div style="height:13px"></div><label class="lbl">州属</label>'+
+     '<div class="chips">'+['Selangor','NS','Johor','Melaka'].map(function(st){
+        return '<button class="chip'+(NB.state===st?' on':'')+'" onclick="NB.state=\''+st+'\';drawNewSalesman()">'+st+'</button>'}).join('')+'</div>'+
+     '<div style="color:var(--dim2);font-size:12px;margin-top:10px">Selangor / NS 算中马（司机有抽成）；Johor / Melaka 算南马（无抽成）。</div>'
+   ))+
+   '<div style="height:20px"></div>'+
+   '<button class="btn p" onclick="saveSalesman()">建立并选用</button>'+
+   '<div style="height:9px"></div><button class="btn o" onclick="closeSheet()">取消</button>');
+}
+function nbMode(m){NB.mode=m;drawNewSalesman()}
+function nbOptions(list){
+  if(!list.length)return '<div style="color:var(--dim2);font-size:13px;padding:8px">找不到，改用「开新分行」</div>';
+  return list.map(function(b){
+    return '<button class="chip'+(NB.branch===b.branch?' on':'')+'" onclick="NB.branch=\''+esc(b.branch).replace(/'/g,"\\'")+'\';NB.state=\''+esc(b.state)+'\';drawNewSalesman()">'+
+      esc(b.branch)+'<small>'+esc(b.state)+'</small></button>'}).join('');
+}
+function nbFilter(q){
+  q=(q||'').trim().toUpperCase();
+  var bs=S.boot.branches.filter(function(b){return !q||b.branch.toUpperCase().indexOf(q)>=0}).slice(0,14);
+  var el=document.getElementById('nblist'); if(el)el.innerHTML=nbOptions(bs);
+}
+function brandOf(b){
+  var L=['PERODUA','PROTON','HONDA','CHERY','JAECOO','JETOUR','MITSUBISHI','EMAS','ICAUR'];
+  b=(b||'').toUpperCase();
+  for(var i=0;i<L.length;i++)if(b.indexOf(L[i])===0)return L[i];
+  return 'OTHER';
+}
+function saveSalesman(){
+  var name=F.salesman.trim().toUpperCase();
+  var branch=(NB.branch||'').trim().toUpperCase().replace(/\s+/g,' ');
+  if(!name){toast('请先输入销售员名字','bad');return}
+  if(!branch){toast('请选择或输入分行','bad');return}
+  if(!NB.state){toast('请选州属','bad');return}
+  var region=(NB.state==='Johor'||NB.state==='Melaka')?'SOUTH':'CENTRAL';
+  var brand=brandOf(branch);
+  call('addSalesman',[{salesman:name,branch:branch,brand:brand,state:NB.state,region:region}])
+  .then(function(r){
+    if(!r.ok){toast(r.msg,'bad');return}
+    if(!S.boot.people[name])S.boot.people[name]=[];
+    S.boot.people[name].unshift({branch:branch,brand:brand,state:NB.state,region:region,n:0,primary:true});
+    if(!S.boot.branches.some(function(b){return b.branch===branch}))
+      S.boot.branches.push({branch:branch,brand:brand,state:NB.state,region:region});
+    setPerson(name,S.boot.people[name][0]);
+    closeSheet();toast('已新增 '+name+' · '+branch,'ok');renderOrder();
+  }).catch(function(e){toast(String(e.message||e),'bad')});
+}
+
+/* --- 进阶 --- */
+function advSheet(){
+  openSheet('<div style="font-family:var(--sf);font-size:25px;margin-bottom:4px">进阶设定</div>'+
+   '<div class="h1s" style="margin-bottom:20px">特别价 / 手动调整</div>'+
+   '<label class="lbl">总额（留空 = 自动 数量×售价）</label>'+
+   '<input class="inp" id="ovT" inputmode="decimal" placeholder="自动：RM '+rm(F.qty*F.price)+'" value="'+F.ovTotal+'">'+
+   '<div style="height:13px"></div><label class="lbl">我的利润（留空 = 自动）</label>'+
+   '<input class="inp" id="ovM" inputmode="decimal" placeholder="自动：RM '+rm(F.qty*F.profit)+'" value="'+F.ovMine+'">'+
+   '<div style="height:13px"></div><label class="lbl">司机抽成（留空 = 自动）</label>'+
+   '<input class="inp" id="ovF" inputmode="decimal" placeholder="自动：RM '+rm(calcFee())+'" value="'+F.ovFee+'">'+
+   '<div style="height:13px"></div><label class="lbl">备注</label>'+
+   '<input class="inp" id="ovN" placeholder="选填" value="'+esc(F.note)+'">'+
+   '<div style="height:22px"></div><button class="btn p" onclick="advSave()">套用</button>');
+}
+function advSave(){
+  F.ovTotal=document.getElementById('ovT').value.trim();
+  F.ovMine=document.getElementById('ovM').value.trim();
+  F.ovFee=document.getElementById('ovF').value.trim();
+  F.note=document.getElementById('ovN').value.trim();
+  closeSheet();renderOrder();toast('已套用','ok');
+}
+
+/* --- 提交 --- */
+function submit(){
+  var btn=document.querySelector('.btn.p');btn.setAttribute('disabled','');btn.textContent='处理中…';
+  call('submitOrder',[{salesman:F.salesman,branch:F.branch,brand:F.brand,state:F.state,region:F.region,
+    setType:F.setType,price:F.price,profitPerSet:F.profit,qty:F.qty,payStatus:F.pay,note:F.note,
+    totalOverride:F.ovTotal,myIncomeOverride:F.ovMine,driverFeeOverride:F.ovFee,by:S.user.name}])
+  .then(function(r){
+    btn.removeAttribute('disabled');btn.textContent='确认下单';
+    if(!r.ok){toast(r.msg,'bad');return}
+    successSheet(r.order,r.wa);
+    F.setType='';F.price=0;F.profit=0;F.qty=1;F.ovTotal='';F.ovMine='';F.ovFee='';F.note='';
+    F.salesman='';F.branch='';F.state='';F.region='';F.brand='';
+    renderOrder();
+  }).catch(function(e){btn.removeAttribute('disabled');btn.textContent='确认下单';toast(String(e.message||e),'bad')});
+}
+function successSheet(o,wa){
+  var phone=(S.boot.driver.phone||'').replace(/[^0-9]/g,'');
+  openSheet('<div class="ok-ic">✓</div>'+
+   '<div style="text-align:center;font-family:var(--sf);font-size:27px;margin-bottom:3px">订单已记录</div>'+
+   '<div style="text-align:center;color:var(--dim2);font-size:11px;letter-spacing:.28em;margin-bottom:22px">'+esc(o.ORDER_ID)+'</div>'+
+   '<div class="card"><div class="sumrow"><span class="k">'+esc(o.SALESMAN)+'</span><span class="v" style="font-size:14px">'+esc(o.BRANCH)+'</span></div>'+
+   '<div class="sumrow"><span class="k">'+esc(o.SET_TYPE)+' × '+o.QTY+'</span><span class="v"><span class="cur">RM</span>'+rm(o.TOTAL_INCOME)+'</span></div></div>'+
+   '<label class="lbl">通知司机的内容</label><div class="mono">'+esc(wa)+'</div><div style="height:15px"></div>'+
+   (phone?'<a href="https://wa.me/'+phone+'?text='+encodeURIComponent(wa)+'" target="_blank" style="text-decoration:none">'+
+     '<button class="btn g">WhatsApp 通知司机</button></a><div style="height:9px"></div>':'')+
+   '<button class="btn o" onclick="closeSheet()">完成</button>');
+}
+
+/* ================= 订单清单 ================= */
+function loadList(){
+  var el=document.getElementById('v-list');
+  el.innerHTML='<div class="h1">订单</div><div class="h1s">Orders</div><div class="load"><div class="spin"></div></div>';
+  call('getOrders',[{month:S.month||'',limit:200}]).then(function(rows){
+    S.orders=rows;renderList()}).catch(function(e){el.innerHTML='<div class="empty">'+esc(e.message||e)+'</div>'});
+}
+function renderList(){
+  var admin=boss();
+  var ms=[0,1,2,3,4,5,6,7,8,9,10,11,12];
+  document.getElementById('v-list').innerHTML=
+   '<div class="h1">订单</div><div class="h1s">Orders</div>'+
+   '<input class="inp" placeholder="搜索 名字 / branch / 单号…" oninput="filterList(this.value)" style="margin-bottom:12px">'+
+   '<div class="chips" style="margin-bottom:16px;overflow-x:auto;flex-wrap:nowrap;padding-bottom:4px">'+
+     ms.map(function(m){return '<button class="chip'+(S.month===m?' on':'')+'" style="flex-shrink:0" onclick="S.month='+m+';loadList()">'+
+       (m===0?'全部':MONTHS[m])+'</button>'}).join('')+'</div>'+
+   '<div id="olist"></div>';
+  paintList(S.orders);
+}
+function filterList(q){
+  q=q.trim().toUpperCase();
+  paintList(!q?S.orders:S.orders.filter(function(o){
+    return o.salesman.toUpperCase().indexOf(q)>=0||o.branch.toUpperCase().indexOf(q)>=0||o.id.toUpperCase().indexOf(q)>=0}));
+}
+function paintList(rows){
+  var admin=boss();
+  var el=document.getElementById('olist'); if(!el)return;
+  if(!rows.length){el.innerHTML='<div class="empty"><div class="ic">∅</div>没有订单</div>';return}
+  el.innerHTML=rows.map(function(o){
+    return '<div class="oi" onclick="openOrder(\''+o.id+'\')"><div class="r1"><div><div class="b">'+esc(o.salesman)+'</div>'+
+      '<div class="s">'+esc(o.branch)+' · '+esc(o.date)+'</div></div>'+
+      '<div class="amt">RM '+rm(o.total)+'</div></div>'+
+      '<div class="r2"><span class="tag set">'+esc(o.setType)+' × '+o.qty+'</span>'+
+      '<span class="tag '+(o.pay==='PAID'?'paid':o.pay==='OP'?'op':'pend')+'">'+esc(o.pay||'—')+'</span>'+
+      (admin?'<span class="tag dlv">利 RM'+rm(o.mine)+'</span><span class="tag dlv">司 RM'+rm(o.fee)+'</span>':'')+
+      (o.pay!=='PAID'?'<button class="tag paid" style="margin-left:auto;border:1px solid rgba(75,192,139,.3)" onclick="event.stopPropagation();pay(\''+o.id+'\')">标记已付</button>':'')+
+      '</div></div>'}).join('');
+}
+function pay(id){call('markPaid',[id,'']).then(function(r){
+  if(r.ok){toast('已标记付款','ok');loadList()}else toast(r.msg,'bad')})}
+
+/* --- 订单详情 / 编辑 / 作废 --- */
+function findO(id){var o=null;(S.orders||[]).concat(S.pending||[]).forEach(function(x){if(x.id===id)o=x});return o}
+function openOrder(id){
+  var o=findO(id); if(!o)return;
+  var admin=boss(), canEdit=boss();
+  var tiers=(S.boot.setTypes[o.setType]||[]);
+  openSheet('<div style="font-family:var(--sf);font-size:25px;margin-bottom:3px">'+esc(o.salesman)+'</div>'+
+   '<div class="h1s" style="margin-bottom:18px">'+esc(o.branch)+' · '+esc(o.date)+' · '+esc(o.id)+'</div>'+
+   '<div class="card"><div class="sumrow"><span class="k">'+esc(o.setType)+'</span>'+
+     '<span class="v" style="font-size:15px">RM '+o.price+' / set</span></div>'+
+   '<div class="sumrow"><span class="k">总额</span><span class="v"><span class="cur">RM</span>'+rm(o.total)+'</span></div>'+
+   (admin?'<div class="sumrow"><span class="k">我的利润</span><span class="v" style="color:var(--ok)"><span class="cur">RM</span>'+rm(o.mine)+'</span></div>'+
+     '<div class="sumrow"><span class="k">司机抽成</span><span class="v" style="color:var(--warn)"><span class="cur">RM</span>'+rm(o.fee)+'</span></div>':'')+
+   '</div>'+
+   (canEdit?(
+     '<label class="lbl">修改</label>'+
+     '<div class="row" style="margin-bottom:11px">'+
+       '<div><div class="lbl" style="letter-spacing:.14em">数量</div><input class="inp" id="eQ" inputmode="numeric" value="'+o.qty+'"></div>'+
+       '<div><div class="lbl" style="letter-spacing:.14em">售价</div><input class="inp" id="eP" inputmode="decimal" value="'+o.price+'"></div>'+
+     '</div>'+
+     '<div class="lbl">付款状态</div><div class="chips" id="ePay" style="margin-bottom:11px">'+
+       S.boot.payOptions.map(function(p){return '<button class="chip'+(o.pay===p?' on':'')+'" data-p="'+p+'" onclick="ePick(this)">'+p+'</button>'}).join('')+
+     '</div>'+
+     '<div class="lbl">备注</div><input class="inp" id="eN" placeholder="选填" value="'+esc(o.note||'')+'">'+
+     '<div style="height:18px"></div>'+
+     '<button class="btn p" onclick="saveOrder(\''+o.id+'\')">储存修改</button>'+
+     '<div style="height:9px"></div>'+
+     (tiers.length?'<div style="color:var(--dim2);font-size:11px;text-align:center;margin-bottom:12px">此 SET 的标准售价：'+tiers.map(function(t){return 'RM'+t.price}).join(' / ')+'　（改售价後利润会自动重算）</div>':'')+
+     '<button class="btn danger" onclick="askVoid(\''+o.id+'\')">作废这笔订单</button>'
+   ):'')+
+   '<div style="height:9px"></div><button class="btn o" onclick="closeSheet()">关闭</button>');
+}
+function ePick(b){document.querySelectorAll('#ePay .chip').forEach(function(c){c.className='chip'});b.className='chip on'}
+function saveOrder(id){
+  var payEl=document.querySelector('#ePay .chip.on');
+  call('updateOrder',[{id:id,qty:document.getElementById('eQ').value,price:document.getElementById('eP').value,
+    payStatus:payEl?payEl.getAttribute('data-p'):'',note:document.getElementById('eN').value,
+    totalOverride:'',myIncomeOverride:'',driverFeeOverride:''}])
+  .then(function(r){
+    if(!r.ok){toast(r.msg,'bad');return}
+    closeSheet();toast('已更新','ok');loadList();
+  }).catch(function(e){toast(String(e.message||e),'bad')});
+}
+function askVoid(id){
+  openSheet('<div class="ok-ic" style="border-color:rgba(226,104,95,.42);color:var(--bad);'+
+   'background:linear-gradient(145deg,rgba(226,104,95,.2),rgba(226,104,95,.05))">!</div>'+
+   '<div style="text-align:center;font-family:var(--sf);font-size:25px;margin-bottom:8px">确定作废？</div>'+
+   '<div style="text-align:center;color:var(--dim);font-size:13px;line-height:1.7;margin-bottom:24px">'+
+     esc(id)+' 会从报表和送货单剔除，<br>但资料仍保留在 Google Sheet 里可以复原。</div>'+
+   '<button class="btn danger" onclick="doVoid(\''+id+'\')">确定作废</button>'+
+   '<div style="height:9px"></div><button class="btn o" onclick="closeSheet()">取消</button>');
+}
+function doVoid(id){
+  call('voidOrder',[id,S.user.name]).then(function(r){
+    if(!r.ok){toast(r.msg,'bad');return}
+    closeSheet();toast('已作废 '+id,'ok');loadList();
+  }).catch(function(e){toast(String(e.message||e),'bad')});
+}
+
+/* ================= 报表 ================= */
+function loadDash(){
+  var el=document.getElementById('v-dash');
+  el.innerHTML='<div class="h1">报表</div><div class="h1s">Dashboard</div><div class="load"><div class="spin"></div></div>';
+  call('getDashboard',[{month:S.month||''}]).then(function(d){S.dash=d;renderDash()})
+    .catch(function(e){el.innerHTML='<div class="empty">'+esc(e.message||e)+'</div>'});
+}
+function renderDash(){
+  var d=S.dash,t=d.total,admin=boss();
+  var maxM=Math.max.apply(null,d.months.map(function(x){return x.income}).concat([1]));
+  var maxB=Math.max.apply(null,d.branches.map(function(x){return x.income}).concat([1]));
+  document.getElementById('v-dash').innerHTML=
+   '<div class="h1">报表</div><div class="h1s">'+(S.month?MONTHS[S.month]:'全部 · 累计')+'</div>'+
+   '<div class="chips" style="margin-bottom:16px;overflow-x:auto;flex-wrap:nowrap;padding-bottom:4px">'+
+     [0,1,2,3,4,5,6,7,8,9,10,11,12].map(function(m){return '<button class="chip'+(S.month===m?' on':'')+'" style="flex-shrink:0" onclick="S.month='+m+';loadDash()">'+
+       (m===0?'全部':MONTHS[m])+'</button>'}).join('')+'</div>'+
+
+   '<div class="grid2">'+
+     '<div class="stat hi"><div class="k">营业额</div><div class="v"><small>RM</small>'+rm0(t.income)+'</div></div>'+
+     (admin?'<div class="stat"><div class="k">我的利润</div><div class="v" style="color:var(--ok)"><small>RM</small>'+rm0(t.mine)+'</div></div>':'')+
+     '<div class="stat"><div class="k">司机抽成</div><div class="v" style="color:var(--warn)"><small>RM</small>'+rm0(t.fee)+'</div></div>'+
+     '<div class="stat"><div class="k">订单笔数</div><div class="v">'+rm0(t.orders)+'<span class="unit">单</span></div></div>'+
+     '<div class="stat"><div class="k">总 Set 数</div><div class="v">'+rm0(t.sets)+'<span class="unit">set</span></div></div>'+
+   '</div>'+
+
+   (admin?'<div class="card"><label class="lbl">应付司机（含 Allowance RM'+rm0(d.allowance)+'/月）</label>'+
+     '<div style="font-family:var(--sf);font-size:36px;color:var(--warn)"><span class="cur">RM</span>'+rm(d.driverPayable)+'</div>'+
+     '<div style="color:var(--dim2);font-size:11.5px;margin-top:6px">抽成 RM'+rm(t.fee)+' + Allowance RM'+rm0(d.allowance*(S.month?1:d.nMonths))+'</div></div>':'')+
+
+   (d.months.length>1?'<div class="card"><label class="lbl">每月营业额</label>'+
+     d.months.map(function(m){return '<div class="bar"><div class="n">'+MONTHS[m.m]+'</div>'+
+       '<div class="t"><div class="f" style="width:'+(m.income/maxM*100)+'%"></div></div>'+
+       '<div class="a">'+rm0(m.income)+'</div></div>'}).join('')+'</div>':'')+
+
+   '<div class="card"><label class="lbl">Top Branch</label>'+
+     d.branches.map(function(b){return '<div class="bar"><div class="n" style="width:118px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(b.name)+'</div>'+
+       '<div class="t"><div class="f" style="width:'+(b.income/maxB*100)+'%"></div></div>'+
+       '<div class="a">'+rm0(b.income)+'</div></div>'}).join('')+'</div>'+
+
+   '<div class="card"><label class="lbl">Set 类型</label>'+
+     d.sets.slice(0,8).map(function(s){return '<div class="bar"><div class="n" style="width:118px">'+esc(s.name)+'</div>'+
+       '<div class="t"><div class="f" style="width:'+(s.income/(d.sets[0].income||1)*100)+'%"></div></div>'+
+       '<div class="a">'+rm0(s.income)+'</div></div>'}).join('')+'</div>';
+}
+
+/* ================= 司机 ================= */
+function loadDriver(){
+  var el=document.getElementById('v-driver');
+  el.innerHTML='<div class="h1">送货单</div><div class="h1s">Delivery</div><div class="load"><div class="spin"></div></div>';
+  call('getOrders',[{pending:true,limit:120}]).then(function(rows){S.pending=rows;S.sel={};renderDriver()})
+    .catch(function(e){el.innerHTML='<div class="empty">'+esc(e.message||e)+'</div>'});
+}
+function renderDriver(){
+  var admin=boss();
+  var rows=S.pending||[];
+  var n=Object.keys(S.sel).filter(function(k){return S.sel[k]}).length;
+  document.getElementById('v-driver').innerHTML=
+   '<div class="h1">送货单</div><div class="h1s">'+(rows.length?rows.length+' 单待送':'全部已送')+'</div>'+
+   (rows.length&&admin?'<div class="hint">勾选下面的订单 → 按绿色按钮一键 WhatsApp 通知 '+esc(S.boot.driver.name||'司机')+'</div>':'')+
+   (rows.length?('<div class="seg"><button class="on" onclick="selAll(1)">全选</button><button onclick="selAll(0)">全不选</button></div>'+
+    rows.map(function(o){
+      return '<div class="oi'+(S.sel[o.id]?' sel':'')+'" onclick="tog(\''+o.id+'\')">'+
+        '<div class="r1"><div><div class="b">'+esc(o.branch)+'</div>'+
+        '<div class="s">'+esc(o.salesman)+' · '+esc(o.date)+'</div></div>'+
+        '<div class="amt">'+o.qty+' set</div></div>'+
+        '<div class="r2"><span class="tag set">'+esc(o.setType)+'</span>'+
+        (admin?'<span class="tag dlv">抽成 RM'+rm(o.fee)+'</span>':'')+'</div></div>'}).join('')+
+    '<div style="height:10px"></div>'+
+    '<button class="btn g" '+(n?'':'disabled')+' onclick="notify()">WhatsApp 通知司机（'+n+' 单）</button>'+
+    '<div style="height:9px"></div>'+
+    '<button class="btn o" '+(n?'':'disabled')+' onclick="doneMark()">标记已送达（'+n+' 单）</button>')
+   :'<div class="empty"><div class="ic">✓</div>没有待送订单</div>');
+}
+function tog(id){S.sel[id]=!S.sel[id];renderDriver()}
+function selAll(v){(S.pending||[]).forEach(function(o){S.sel[o.id]=!!v});renderDriver()}
+function notify(){
+  var ids=Object.keys(S.sel).filter(function(k){return S.sel[k]});
+  call('notifyDriver',[ids]).then(function(r){
+    if(!r.ok){toast(r.msg,'bad');return}
+    openSheet('<div style="font-family:var(--sf);font-size:25px;margin-bottom:3px">通知司机</div>'+
+     '<div class="h1s" style="margin-bottom:18px">'+r.count+' 单 · '+esc(r.phone||'未设号码')+'</div>'+
+     '<div class="mono">'+esc(r.text)+'</div><div style="height:16px"></div>'+
+     (r.phone?'<a href="https://wa.me/'+r.phone+'?text='+encodeURIComponent(r.text)+'" target="_blank" style="text-decoration:none">'+
+       '<button class="btn g">打开 WhatsApp 发送</button></a><div style="height:9px"></div>':'')+
+     '<button class="btn o" onclick="copyTxt()">复制文字</button>'+
+     '<textarea id="cpTxt" style="position:absolute;left:-9999px">'+esc(r.text)+'</textarea>');
+  }).catch(function(e){toast(String(e.message||e),'bad')});
+}
+function copyTxt(){var t=document.getElementById('cpTxt');t.select();
+  try{document.execCommand('copy');toast('已复制','ok')}catch(e){toast('复制失败','bad')}}
+function doneMark(){
+  var ids=Object.keys(S.sel).filter(function(k){return S.sel[k]});
+  call('markDelivered',[ids]).then(function(r){
+    if(r.ok){toast('已标记 '+r.n+' 单送达','ok');loadDriver()}else toast(r.msg,'bad')});
+}
+
+/* ================= 设定 · 帐号管理（限 admin） ================= */
+var ROLE_TXT={admin:'管理员 · 可管帐号',partner:'合伙人 · 同等权限',driver:'司机 · 只看送货'};
+function loadSettings(){
+  var el=document.getElementById('v-set');
+  el.innerHTML='<div class="h1">设定</div><div class="h1s">Accounts</div><div class="load"><div class="spin"></div></div>';
+  call('adminListUsers',[AUTH]).then(function(r){
+    if(!r.ok){el.innerHTML='<div class="h1">设定</div><div class="empty">'+esc(r.msg)+'</div>';return}
+    S.users=r.users;renderSettings();
+  }).catch(function(e){el.innerHTML='<div class="empty">'+esc(e.message||e)+'</div>'});
+}
+function renderSettings(){
+  document.getElementById('v-set').innerHTML=
+   '<div class="h1">设定</div><div class="h1s">帐号与密码</div>'+
+   (S.users||[]).map(function(u,i){
+     var me=u.name===S.user.name;
+     return '<div class="card" style="padding:15px 16px">'+
+       '<div style="display:flex;align-items:center;gap:9px;margin-bottom:4px">'+
+         '<span style="font-size:15px;font-weight:600">'+esc(u.name)+'</span>'+
+         (me?'<span class="chipr">你自己</span>':'')+
+         (u.active?'':'<span class="tag pend">已停用</span>')+
+       '</div>'+
+       '<div style="color:var(--dim2);font-size:11.5px;margin-bottom:12px">'+esc(ROLE_TXT[u.role]||u.role)+'</div>'+
+       '<div style="display:flex;align-items:center;gap:9px">'+
+         '<span class="lbl" style="margin:0">PIN</span>'+
+         '<span id="pv'+i+'" style="font-family:ui-monospace,monospace;font-size:16px;letter-spacing:.28em">••••</span>'+
+         '<button class="tag dlv" style="border:1px solid var(--line2)" onclick="peek('+i+')">显示</button>'+
+         '<button class="tag paid" style="margin-left:auto;border:1px solid rgba(75,192,139,.3)" onclick="askPin(\''+esc(u.name)+'\')">改 PIN</button>'+
+         (me?'':'<button class="tag '+(u.active?'pend':'dlv')+'" style="border:1px solid var(--line2)" onclick="toggleUser(\''+esc(u.name)+'\','+(u.active?'false':'true')+')">'+(u.active?'停用':'启用')+'</button>')+
+       '</div></div>'}).join('')+
+   '<div style="height:6px"></div>'+
+   '<button class="btn o" onclick="askNewUser()">＋ 新增帐号</button>'+
+   '<div style="height:14px"></div>'+
+   '<div class="hint" style="background:rgba(201,162,39,.07);border-color:rgba(201,162,39,.22);color:var(--gold2)">'+
+     'PIN 一定要 4 位数字，而且不能跟别人重复。改完立刻生效，下次登入用新的。</div>';
+}
+function peek(i){
+  var el=document.getElementById('pv'+i);
+  if(el.textContent==='••••'){el.textContent=S.users[i].pin;setTimeout(function(){el.textContent='••••'},5000)}
+  else el.textContent='••••';
+}
+function askPin(name){
+  openSheet('<div style="font-family:var(--sf);font-size:25px;margin-bottom:3px">改 PIN</div>'+
+   '<div class="h1s" style="margin-bottom:20px">'+esc(name)+'</div>'+
+   '<label class="lbl">新的 4 位数字</label>'+
+   '<input class="inp" id="npin" inputmode="numeric" maxlength="4" placeholder="例如 8842" '+
+     'style="text-align:center;font-size:26px;letter-spacing:.42em;font-family:ui-monospace,monospace">'+
+   '<div style="height:20px"></div>'+
+   '<button class="btn p" onclick="savePin(\''+esc(name)+'\')">确定修改</button>'+
+   '<div style="height:9px"></div><button class="btn o" onclick="closeSheet()">取消</button>');
+  setTimeout(function(){var n=document.getElementById('npin');if(n)n.focus()},250);
+}
+function savePin(name){
+  var v=(document.getElementById('npin').value||'').trim();
+  if(!/^\d{4}$/.test(v)){toast('PIN 必须是 4 位数字','bad');return}
+  call('adminSetPin',[AUTH,name,v]).then(function(r){
+    if(!r.ok){toast(r.msg,'bad');return}
+    if(name===S.user.name)AUTH=v;
+    closeSheet();toast(name+' 的 PIN 已改','ok');loadSettings();
+  }).catch(function(e){toast(String(e.message||e),'bad')});
+}
+function askNewUser(){
+  openSheet('<div style="font-family:var(--sf);font-size:25px;margin-bottom:3px">新增帐号</div>'+
+   '<div class="h1s" style="margin-bottom:20px">New account</div>'+
+   '<label class="lbl">名字</label><input class="inp" id="uN" placeholder="例如 PARTNER2">'+
+   '<div style="height:13px"></div><label class="lbl">PIN（4 位数字）</label>'+
+   '<input class="inp" id="uP" inputmode="numeric" maxlength="4" placeholder="例如 5566" '+
+     'style="text-align:center;font-size:22px;letter-spacing:.36em;font-family:ui-monospace,monospace">'+
+   '<div style="height:13px"></div><label class="lbl">身分</label>'+
+   '<div class="chips" id="uR">'+
+     ['admin','partner','driver'].map(function(r,i){return '<button class="chip'+(i===1?' on':'')+'" data-r="'+r+'" onclick="uPick(this)">'+r+'</button>'}).join('')+
+   '</div><div style="height:20px"></div>'+
+   '<button class="btn p" onclick="saveUser()">建立</button>'+
+   '<div style="height:9px"></div><button class="btn o" onclick="closeSheet()">取消</button>');
+}
+function uPick(b){document.querySelectorAll('#uR .chip').forEach(function(c){c.className='chip'});b.className='chip on'}
+function saveUser(){
+  var r=document.querySelector('#uR .chip.on');
+  call('adminAddUser',[AUTH,document.getElementById('uN').value,document.getElementById('uP').value,r?r.getAttribute('data-r'):''])
+  .then(function(x){
+    if(!x.ok){toast(x.msg,'bad');return}
+    closeSheet();toast('已新增','ok');loadSettings();
+  }).catch(function(e){toast(String(e.message||e),'bad')});
+}
+function toggleUser(name,on){
+  call('adminSetActive',[AUTH,name,on]).then(function(r){
+    if(!r.ok){toast(r.msg,'bad');return}
+    toast(on?'已启用 '+name:'已停用 '+name,'ok');loadSettings();
+  }).catch(function(e){toast(String(e.message||e),'bad')});
+}
+
+/* ================= GO ================= */
+renderLogin();
+</script>
+</body>
+</html>
