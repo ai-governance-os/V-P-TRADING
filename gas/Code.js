@@ -777,6 +777,75 @@ function getStatement(opt) {
   };
 }
 
+/* ---------- 月报（给持有人自己存一份 Excel） ----------
+   栏位排法照客户原本那份月份分页，后面才补上收款方式 / 日期 / 备注。
+   含「我的利润」，所以这份档案不要转发给司机。
+------------------------------------------------------- */
+function getMonthlyReport(opt) {
+  opt = opt || {};
+  var month = toNum_(opt.month);
+  if (!(month >= 1 && month <= 12)) return { ok: false, msg: '请选择月份' };
+
+  var t = readTable_('ORDERS');
+  var dv = readTable_('DRIVER').rows[0] || {};
+  var rules = readTable_('DRIVER_RULE').rows;
+
+  var rows = [], byBranch = {}, bySet = {};
+  var tot = { orders: 0, sets: 0, income: 0, mine: 0, fee: 0,
+              paid: 0, paidN: 0, unpaid: 0, unpaidN: 0, op: 0, pc: 0, cash: 0 };
+
+  t.rows.forEach(function (r) {
+    if (isVoid_(r) || toNum_(r.MONTH) !== month) return;
+    var qty = toNum_(r.QTY), price = toNum_(r.UNIT_PRICE),
+        inc = toNum_(r.TOTAL_INCOME), mine = toNum_(r.MY_INCOME), fee = toNum_(r.DRIVER_FEE);
+    var paid = payPaid_(r), method = payMethod_(r);
+    var b = String(r.BRANCH || '-'), st = String(r.SET_TYPE || '-');
+
+    rows.push({
+      date: fmtDate_(r.DATE), state: String(r.STATE || ''), branch: b,
+      salesman: String(r.SALESMAN || ''), sets: qty, price: price,
+      income: inc, mine: mine, setDetail: st, fee: fee,
+      method: method, payDate: String(r.PAY_DATE || ''),
+      payNote: String(r.PAY_NOTE || ''), paid: paid,
+      delivery: String(r.DELIVERY_STATUS || ''), note: String(r.NOTE || '')
+    });
+
+    tot.orders++; tot.sets += qty; tot.income += inc; tot.mine += mine; tot.fee += fee;
+    if (paid) { tot.paid += inc; tot.paidN++; if (method === 'OP') tot.op += inc; if (method === 'PC') { tot.pc += inc; if (fee) tot.cash += inc; } }
+    else { tot.unpaid += inc; tot.unpaidN++; }
+
+    byBranch[b] = byBranch[b] || { name: b, orders: 0, sets: 0, income: 0, mine: 0, fee: 0, unpaid: 0 };
+    byBranch[b].orders++; byBranch[b].sets += qty; byBranch[b].income += inc;
+    byBranch[b].mine += mine; byBranch[b].fee += fee; if (!paid) byBranch[b].unpaid += inc;
+
+    bySet[st] = bySet[st] || { name: st, sets: 0, income: 0, mine: 0 };
+    bySet[st].sets += qty; bySet[st].income += inc; bySet[st].mine += mine;
+  });
+
+  if (!tot.orders) return { ok: false, msg: statMonthName_(month) + '没有订单' };
+
+  rows.sort(function (a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; });
+  rows.forEach(function (r, i) { r.bil = i + 1; });
+
+  var K = function (o) { return Object.keys(o).map(function (k) { return o[k]; }); };
+  var r2 = function (n) { return Math.round(n * 100) / 100; };
+  ['income', 'mine', 'fee', 'paid', 'unpaid', 'op', 'pc', 'cash'].forEach(function (k) { tot[k] = r2(tot[k]); });
+
+  var allowance = toNum_(dv.ALLOWANCE_PER_MONTH);
+  return {
+    ok: true, month: month, monthName: statMonthName_(month),
+    company: config_().COMPANY || 'V&P TRADING',
+    driver: String(dv.DRIVER_NAME || ''),
+    rows: rows, total: tot,
+    allowance: allowance,
+    driverPayable: r2(tot.fee + allowance - tot.cash),
+    branches: K(byBranch).sort(function (a, b) { return b.income - a.income; }),
+    sets: K(bySet).sort(function (a, b) { return b.income - a.income; }),
+    statement: getStatement({ month: month }),
+    generated: Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'Asia/Kuala_Lumpur', 'yyyy-MM-dd HH:mm')
+  };
+}
+
 /* ---------- 报表 ---------- */
 function getDashboard(opt) {
   opt = opt || {};

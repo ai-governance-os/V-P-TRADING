@@ -805,6 +805,15 @@ function renderDash(){
      '<button class="btn o" style="padding:12px;font-size:14px" onclick="S.bill=null;go(\'bill\')">开司机月结单 →</button>'+
    '</div>':'')+
 
+   (admin?'<div class="card">'+
+     '<label class="lbl">存档 / 备份</label>'+
+     '<div style="color:var(--dim);font-size:13px;line-height:1.7;margin-bottom:13px">'+
+       '把某个月整个下载成 Excel 存在自己电脑。<br>'+
+       '订单明细、月结总览、司机抽成、分行小计，四个分页都在里面。</div>'+
+     '<button class="btn o" style="padding:12px;font-size:14px" onclick="askMonthly()">下载月报 Excel →</button>'+
+     '<div class="hint" style="margin-top:11px">建议每个月做一次。这份档案不依赖网络也不依赖任何人，是你自己的底。</div>'+
+   '</div>':'')+
+
    (d.months.length>1?'<div class="card"><label class="lbl">每月营业额</label>'+
      d.months.map(function(m){return '<div class="bar"><div class="n">'+MONTHS[m.m]+'</div>'+
        '<div class="t"><div class="f" style="width:'+(m.income/maxM*100)+'%"></div></div>'+
@@ -966,16 +975,21 @@ function csvBill(){
   dl(new Blob([s],{type:'text/csv;charset=utf-8'}),billName('csv'));
   toast('已下载 CSV，用 Excel 打开就行','ok');
 }
-function exportBill(){
-  if(!S.bill){toast('还没有资料','bad');return}
-  if(window.XLSX){return xlsxBill()}
+/** 载入 SheetJS 再做事；载不到就走退路 */
+function withXLSX(ok,fail){
+  if(window.XLSX)return ok(window.XLSX);
   toast('准备 Excel…','ok');
+  var done=false;
   var sc=document.createElement('script');
   sc.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
-  sc.onload=function(){ try{xlsxBill()}catch(e){csvBill()} };
-  sc.onerror=function(){ csvBill() };
+  sc.onload=function(){ if(done)return; done=true; try{ok(window.XLSX)}catch(e){fail(e)} };
+  sc.onerror=function(){ if(done)return; done=true; fail() };
   document.head.appendChild(sc);
-  setTimeout(function(){ if(!window.XLSX){ sc.onerror=null; csvBill() } },7000);
+  setTimeout(function(){ if(!done&&!window.XLSX){ done=true; fail() } },9000);
+}
+function exportBill(){
+  if(!S.bill){toast('还没有资料','bad');return}
+  withXLSX(xlsxBill,csvBill);
 }
 function xlsxBill(){
   var b=S.bill,X=window.XLSX;
@@ -1005,6 +1019,121 @@ function waBill(){
   var phone=(S.boot&&S.boot.driver&&S.boot.driver.phone)||'';
   var url='https://wa.me/'+phone+'?text='+encodeURIComponent(L.join('\n'));
   window.open(url,'_blank');
+}
+
+/* ================= 月报 Excel（持有人自己存档用） ================= */
+function askMonthly(){
+  openSheet('<div style="font-family:var(--sf);font-size:25px;margin-bottom:3px">下载月报</div>'+
+   '<div class="h1s" style="margin-bottom:16px">存一份在自己电脑</div>'+
+   '<div class="card" style="padding:13px 15px;margin-bottom:16px">'+
+     '<div style="font-size:13px;color:var(--dim);line-height:1.75">'+
+       '一个 Excel 档，四个分页：订单明细、月结总览、司机抽成、分行小计。<br>'+
+       '<b style="color:var(--warn)">里面有「我的利润」，不要转发给司机。</b>要给司机的是「月结单」那一份。</div>'+
+   '</div>'+
+   '<label class="lbl">选月份</label>'+
+   '<div class="chips" style="margin-bottom:6px">'+
+     [1,2,3,4,5,6,7,8,9,10,11,12].map(function(m){
+       return '<button class="chip" onclick="dlMonthly('+m+')">'+MONTHS[m]+'</button>'}).join('')+
+   '</div>'+
+   '<div style="height:14px"></div><button class="btn o" onclick="closeSheet()">取消</button>');
+}
+function dlMonthly(m){
+  openSheet('<div class="load"><div class="spin"></div></div>'+
+    '<div style="text-align:center;color:var(--dim);font-size:14px">正在整理 '+MONTHS[m]+' 的资料…</div>');
+  call('getMonthlyReport',[{month:m}]).then(function(r){
+    if(!r.ok){toast(r.msg,'bad');closeSheet();return}
+    withXLSX(function(X){ buildMonthlyXlsx(X,r) }, function(){ csvMonthly(r) });
+  }).catch(function(e){toast(String(e.message||e),'bad');closeSheet()});
+}
+function monthlyName(r,ext){
+  return 'VP_'+new Date().getFullYear()+'-'+('0'+r.month).slice(-2)+'_月报.'+ext;
+}
+/** 订单明细：栏位照客户原本那份排，后面才补收款资料 */
+function monthlyDetail(r){
+  var a=[['BIL','DATE','STATE','BRANCH','SALES MAN','SET','ITEMS(RM)','TOTAL INCOME',
+          'My income','SET & DETAIL','司机抽成','收钱了吗','收款方式','收款日期','收款备注','送货','备注']];
+  r.rows.forEach(function(o){
+    a.push([o.bil,o.date,o.state,o.branch,o.salesman,o.sets,o.price,o.income,o.mine,o.setDetail,
+      o.fee, o.paid?'已收':'未收', o.method||'', o.payDate||'', o.payNote||'',
+      o.delivery==='DELIVERED'?'已送':'待送', o.note||'']);
+  });
+  var t=r.total;
+  a.push([]);
+  a.push(['','','','','合计',t.sets,'',t.income,t.mine,'',t.fee]);
+  return a;
+}
+function monthlySummary(r){
+  var t=r.total;
+  return [
+    [r.company+' — '+r.monthName+' 月结总览'],
+    ['产生时间',r.generated],
+    ['⚠ 本档案是当下的快照，正式记录以 App 为准。在这里改数字不会回到系统。'],
+    [],
+    ['生意'],
+    ['订单笔数',t.orders],
+    ['总 set 数',t.sets],
+    ['营业额',t.income],
+    ['我的利润',t.mine],
+    [],
+    ['收款'],
+    ['已收到',t.paid,t.paidN+' 笔'],
+    ['　· 转账 OP',t.op],
+    ['　· 现金 PC',t.pc],
+    ['还没收到',t.unpaid,t.unpaidN+' 笔'],
+    [],
+    ['司机 '+(r.driver||'')],
+    ['抽成',t.fee],
+    ['Allowance',r.allowance],
+    ['扣：司机代收现金',-t.cash],
+    ['应转账给司机',r.driverPayable]
+  ];
+}
+function monthlyBranches(r){
+  var a=[['BRANCH','订单','SET','营业额','我的利润','司机抽成','未收款']];
+  r.branches.forEach(function(b){
+    a.push([b.name,b.orders,b.sets,rnd(b.income),rnd(b.mine),rnd(b.fee),rnd(b.unpaid)]);
+  });
+  a.push([]);
+  a.push(['SET 类型','','SET 数','营业额','我的利润']);
+  r.sets.forEach(function(s){ a.push([s.name,'',s.sets,rnd(s.income),rnd(s.mine)]) });
+  return a;
+}
+function rnd(n){return Math.round(n*100)/100}
+function buildMonthlyXlsx(X,r){
+  var wb=X.utils.book_new();
+
+  var d=X.utils.aoa_to_sheet(monthlyDetail(r));
+  d['!cols']=[{wch:5},{wch:12},{wch:10},{wch:26},{wch:15},{wch:6},{wch:10},{wch:13},{wch:11},
+              {wch:16},{wch:10},{wch:9},{wch:10},{wch:12},{wch:18},{wch:7},{wch:16}];
+  X.utils.book_append_sheet(wb,d,'订单明细');
+
+  var s=X.utils.aoa_to_sheet(monthlySummary(r));
+  s['!cols']=[{wch:24},{wch:14},{wch:12}];
+  X.utils.book_append_sheet(wb,s,'月结总览');
+
+  if(r.statement&&r.statement.ok){
+    var save=S.bill; S.bill=r.statement;
+    var st=X.utils.aoa_to_sheet(billRows());
+    st['!cols']=[{wch:6},{wch:11},{wch:26},{wch:16},{wch:7},{wch:9},{wch:12},{wch:18}];
+    X.utils.book_append_sheet(wb,st,'司机抽成');
+    S.bill=save;
+  }
+
+  var b=X.utils.aoa_to_sheet(monthlyBranches(r));
+  b['!cols']=[{wch:28},{wch:8},{wch:8},{wch:12},{wch:12},{wch:12},{wch:12}];
+  X.utils.book_append_sheet(wb,b,'分行小计');
+
+  X.writeFile(wb,monthlyName(r,'xlsx'));
+  closeSheet();
+  toast(MONTHS[r.month]+'月报已下载','ok');
+}
+function csvMonthly(r){
+  var esc2=function(v){v=String(v==null?'':v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v};
+  var out=monthlySummary(r).concat([[],[]],monthlyDetail(r),[[],[]],monthlyBranches(r));
+  var s='﻿'+out.map(function(row){return (row||[]).map(esc2).join(',')}).join('\r\n');
+  dl(new Blob([s],{type:'text/csv;charset=utf-8'}),monthlyName(r,'csv'));
+  closeSheet();
+  toast('已下载 CSV，用 Excel 打开就行','ok');
 }
 
 /* ================= 司机 ================= */
