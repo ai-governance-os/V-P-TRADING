@@ -174,6 +174,10 @@ select.inp{appearance:none;background-image:linear-gradient(45deg,transparent 50
 .hint{background:rgba(75,192,139,.1);border:1px solid rgba(75,192,139,.3);border-radius:12px;
   padding:12px 15px;font-size:13.5px;color:var(--ok);margin-bottom:14px;line-height:1.55}
 .newbox{background:rgba(201,162,39,.08);border:1px dashed rgba(201,162,39,.42);border-radius:14px;padding:14px}
+.addlink{display:block;width:100%;margin-top:13px;padding:13px;border-radius:12px;
+  border:1px dashed rgba(201,162,39,.5);background:rgba(201,162,39,.08);
+  color:var(--gold2);font-size:14.5px;font-weight:600;letter-spacing:.02em;transition:.2s}
+.addlink:active{background:rgba(201,162,39,.2)}
 .load{display:flex;align-items:center;justify-content:center;padding:52px}
 .spin{width:26px;height:26px;border:2px solid rgba(201,162,39,.18);border-top-color:var(--gold);border-radius:50%;animation:sp .75s linear infinite}
 @keyframes sp{to{transform:rotate(360deg)}}
@@ -357,9 +361,7 @@ function renderOrder(){
    '<div class="ac"><input class="inp" id="smq" placeholder="输入名字…" autocomplete="off" '+
      'value="'+esc(F.salesman)+'" oninput="acSearch(this.value)" onfocus="acSearch(this.value)">'+
      '<div id="aclist"></div></div>'+
-   (!branches.length&&F.salesman.trim()?('<div style="margin-top:14px"><div class="newbox">'+
-      '<div style="font-size:14px;color:var(--dim);margin-bottom:11px">名单里没有「<b style="color:var(--txt)">'+esc(F.salesman.trim())+'</b>」</div>'+
-      '<button class="btn p" style="padding:13px;font-size:15px" onclick="askNewSalesman()">＋ 新增这个销售员</button></div></div>'):'')+
+   '<button class="addlink" onclick="askNewSalesman()">＋ 名单里没有这个人？新增销售员</button>'+
    (branches.length?('<div style="margin-top:14px"><label class="lbl">Branch'+
       (branches.length>1?' <span style="color:var(--gold2);letter-spacing:0;text-transform:none;font-size:10px">· '+branches.length+' 间，请选</span>':'')+
       '</label><div class="chips">'+branches.map(function(x,i){
@@ -449,16 +451,19 @@ function pickSet(t){F.setType=t;var ts=S.boot.setTypes[t];
 function pickPrice(i){var t=S.boot.setTypes[F.setType][i];F.price=t.price;F.profit=t.profit;renderOrder()}
 
 /* --- 新增销售员 / 新分行 --- */
-var NB={mode:'old',branch:'',state:''};
+var NB={mode:'old',branch:'',state:'',name:''};
 function askNewSalesman(){
-  NB={mode:'old',branch:'',state:''};
+  NB={mode:'old',branch:'',state:'',name:F.salesman.trim().toUpperCase()};
   drawNewSalesman();
+  setTimeout(function(){var n=document.getElementById('nbPerson');if(n&&!n.value)n.focus()},250);
 }
 function drawNewSalesman(){
-  var name=F.salesman.trim().toUpperCase();
   var bs=S.boot.branches;
   openSheet('<div style="font-family:var(--sf);font-size:26px;margin-bottom:3px">新增销售员</div>'+
-   '<div class="h1s" style="margin-bottom:20px">'+esc(name)+'</div>'+
+   '<div class="h1s" style="margin-bottom:20px">New salesman</div>'+
+   '<label class="lbl">销售员名字</label>'+
+   '<input class="inp" id="nbPerson" placeholder="例如 AHMAD" autocomplete="off" value="'+esc(NB.name)+'" oninput="NB.name=this.value">'+
+   '<div style="height:16px"></div>'+
    '<div class="seg"><button class="'+(NB.mode==='old'?'on':'')+'" onclick="nbMode(\'old\')">选现有分行</button>'+
      '<button class="'+(NB.mode==='new'?'on':'')+'" onclick="nbMode(\'new\')">开新分行</button></div>'+
    (NB.mode==='old'?(
@@ -497,9 +502,9 @@ function brandOf(b){
   return 'OTHER';
 }
 function saveSalesman(){
-  var name=F.salesman.trim().toUpperCase();
+  var name=(NB.name||'').trim().toUpperCase().replace(/\s+/g,' ');
   var branch=(NB.branch||'').trim().toUpperCase().replace(/\s+/g,' ');
-  if(!name){toast('请先输入销售员名字','bad');return}
+  if(!name){toast('请填销售员名字','bad');var n=document.getElementById('nbPerson');if(n)n.focus();return}
   if(!branch){toast('请选择或输入分行','bad');return}
   if(!NB.state){toast('请选州属','bad');return}
   var region=(NB.state==='Johor'||NB.state==='Melaka')?'SOUTH':'CENTRAL';
@@ -511,6 +516,7 @@ function saveSalesman(){
     S.boot.people[name].unshift({branch:branch,brand:brand,state:NB.state,region:region,n:0,primary:true});
     if(!S.boot.branches.some(function(b){return b.branch===branch}))
       S.boot.branches.push({branch:branch,brand:brand,state:NB.state,region:region});
+    F.salesman=name;
     setPerson(name,S.boot.people[name][0]);
     closeSheet();toast('已新增 '+name+' · '+branch,'ok');renderOrder();
   }).catch(function(e){toast(String(e.message||e),'bad')});
