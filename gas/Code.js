@@ -181,10 +181,10 @@ function adminSetDriver(adminPin, p) {
     var phone = String(p.phone == null ? '' : p.phone).replace(/[^0-9]/g, '');
     var allow = toNum_(p.allowance);
     if (!name) return { ok: false, msg: '请填司机名字' };
-    // 本地格式自动转国际格式：012-751 3005 → 60127513005
+    // 本地格式自动转国际格式：012-345 6789 → 60123456789
     if (phone && phone.charAt(0) === '0') phone = '60' + phone.slice(1);
     if (phone && (phone.length < 10 || phone.length > 15))
-      return { ok: false, msg: '电话号码看起来不完整。直接打本地号码就行（例如 0127513005），系统会自动转成 60127513005。' };
+      return { ok: false, msg: '电话号码看起来不完整。直接打本地号码就行（例如 0123456789），系统会自动转成 60123456789。' };
     if (allow < 0) return { ok: false, msg: 'Allowance 不能是负数' };
 
     var t = readTable_('DRIVER');
@@ -694,7 +694,7 @@ function INSTALL() {
   ], '● 司机抽成规则（可改）。已用 1–7 月 Uncle 表 1000+ 笔验证。');
 
   writeSheetKeep_(ss, 'DRIVER', ['DRIVER_NAME', 'PHONE', 'ALLOWANCE_PER_MONTH', 'ACTIVE'],
-    [['UNCLE', '60127513005', 200, 'YES']],
+    [['UNCLE', '60122356648', 200, 'YES']],
     '● 司机资料。PHONE 用国际格式（60 开头，不要 +、空格或 -）。');
 
   writeSheetKeep_(ss, 'USERS', ['NAME', 'PIN', 'ROLE', 'ACTIVE', '说明'], [
@@ -708,7 +708,7 @@ function INSTALL() {
     ['CURRENCY', 'RM', ''],
     ['DEFAULT_PAY_STATUS', 'OP', ''],
     ['PAY_STATUS_OPTIONS', 'OP,PC,PAID,PENDING', '下单时付款状态选项（逗号分隔）'],
-    ['DRIVER_PHONE', '60127513005', '一键通知的 WhatsApp 号码']
+    ['DRIVER_PHONE', '', '（已停用，改由 DRIVER 分页控制）']
   ], '● 系统设定。');
 
   try { CacheService.getScriptCache().remove('boot'); } catch (e) { }
