@@ -568,7 +568,9 @@ function successSheet(o,wa){
    '<div class="sumrow"><span class="k">'+esc(o.SET_TYPE)+' × '+o.QTY+'</span><span class="v"><span class="cur">RM</span>'+rm(o.TOTAL_INCOME)+'</span></div></div>'+
    '<label class="lbl">通知司机的内容</label><div class="mono">'+esc(wa)+'</div><div style="height:15px"></div>'+
    (phone?'<a href="https://wa.me/'+phone+'?text='+encodeURIComponent(wa)+'" target="_blank" style="text-decoration:none">'+
-     '<button class="btn g">WhatsApp 通知司机</button></a><div style="height:9px"></div>':'')+
+     '<button class="btn g">WhatsApp 通知司机</button></a><div style="height:9px"></div>'
+    :'<div class="hint" style="background:rgba(226,104,95,.1);border-color:rgba(226,104,95,.35);color:var(--bad)">'+
+     '还没设定司机电话，不能一键发送。'+(S.user.role==='admin'?'请到「设定」页填上号码。':'请叫 admin 到「设定」页填上号码。')+'</div>')+
    '<button class="btn o" onclick="closeSheet()">完成</button>');
 }
 
@@ -730,7 +732,10 @@ function renderDriver(){
   var n=Object.keys(S.sel).filter(function(k){return S.sel[k]}).length;
   document.getElementById('v-driver').innerHTML=
    '<div class="h1">送货单</div><div class="h1s">'+(rows.length?rows.length+' 单待送':'全部已送')+'</div>'+
-   (rows.length&&admin?'<div class="hint">勾选下面的订单 → 按绿色按钮一键 WhatsApp 通知 '+esc(S.boot.driver.name||'司机')+'</div>':'')+
+   (rows.length&&admin?(S.boot.driver.phone
+     ?'<div class="hint">勾选下面的订单 → 按绿色按钮一键 WhatsApp 通知 '+esc(S.boot.driver.name||'司机')+'</div>'
+     :'<div class="hint" style="background:rgba(226,104,95,.1);border-color:rgba(226,104,95,.35);color:var(--bad)">还没设定司机电话 —— '+
+      (S.user.role==='admin'?'请到「设定」页填上，才能一键发送。':'请叫 admin 到「设定」页填上。')+'</div>'):'')+
    (rows.length?('<div class="seg"><button class="on" onclick="selAll(1)">全选</button><button onclick="selAll(0)">全不选</button></div>'+
     rows.map(function(o){
       return '<div class="oi'+(S.sel[o.id]?' sel':'')+'" onclick="tog(\''+o.id+'\')">'+
@@ -755,7 +760,10 @@ function notify(){
      '<div class="h1s" style="margin-bottom:18px">'+r.count+' 单 · '+esc(r.phone||'未设号码')+'</div>'+
      '<div class="mono">'+esc(r.text)+'</div><div style="height:16px"></div>'+
      (r.phone?'<a href="https://wa.me/'+r.phone+'?text='+encodeURIComponent(r.text)+'" target="_blank" style="text-decoration:none">'+
-       '<button class="btn g">打开 WhatsApp 发送</button></a><div style="height:9px"></div>':'')+
+       '<button class="btn g">打开 WhatsApp 发送</button></a><div style="height:9px"></div>'
+      :'<div class="hint" style="background:rgba(226,104,95,.1);border-color:rgba(226,104,95,.35);color:var(--bad)">'+
+       '还没设定司机电话，所以不能一键发送。'+(S.user.role==='admin'?'请到「设定」页填上号码。':'请叫 admin 到「设定」页填上号码。')+
+       '<br>现在可以先「复制文字」，自己贴进 WhatsApp。</div>')+
      '<button class="btn o" onclick="copyTxt()">复制文字</button>'+
      '<textarea id="cpTxt" style="position:absolute;left:-9999px">'+esc(r.text)+'</textarea>');
   }).catch(function(e){toast(String(e.message||e),'bad')});
@@ -775,12 +783,36 @@ function loadSettings(){
   el.innerHTML='<div class="h1">设定</div><div class="h1s">Accounts</div><div class="load"><div class="spin"></div></div>';
   call('adminListUsers',[AUTH]).then(function(r){
     if(!r.ok){el.innerHTML='<div class="h1">设定</div><div class="empty">'+esc(r.msg)+'</div>';return}
-    S.users=r.users;renderSettings();
+    S.users=r.users;
+    call('adminGetDriver',[AUTH]).then(function(d){
+      S.drv=d.ok?d.driver:{name:'',phone:'',allowance:0};renderSettings();
+    }).catch(function(){S.drv={name:'',phone:'',allowance:0};renderSettings()});
   }).catch(function(e){el.innerHTML='<div class="empty">'+esc(e.message||e)+'</div>'});
 }
 function renderSettings(){
+  var dv=S.drv||{name:'',phone:'',allowance:0};
   document.getElementById('v-set').innerHTML=
-   '<div class="h1">设定</div><div class="h1s">帐号与密码</div>'+
+   '<div class="h1">设定</div><div class="h1s">司机资料</div>'+
+   (dv.phone?'':'<div class="hint" style="background:rgba(226,104,95,.1);border-color:rgba(226,104,95,.35);color:var(--bad)">'+
+     '尚未设定司机电话 —— 「一键 WhatsApp 通知司机」现在无法使用。请在下面填上号码。</div>')+
+   '<div class="card">'+
+     '<label class="lbl">司机名字</label>'+
+     '<input class="inp" id="dvName" placeholder="例如 UNCLE" value="'+esc(dv.name)+'">'+
+     '<div style="height:13px"></div>'+
+     '<label class="lbl">WhatsApp 号码</label>'+
+     '<input class="inp" id="dvPhone" inputmode="numeric" placeholder="60123456789" value="'+esc(dv.phone)+'">'+
+     '<div style="color:var(--dim2);font-size:12.5px;margin-top:8px;line-height:1.6">'+
+       '直接打平常的号码就好，例如 <b style="color:var(--dim)">012-751 3005</b>。<br>'+
+       '系统会自动转成 <b style="color:var(--gold2)">60127513005</b>（WhatsApp 需要的格式）。<br>'+
+       '空格、+、- 都可以打，会自动清掉。存好后请核对提示里的号码。</div>'+
+     '<div style="height:15px"></div>'+
+     '<label class="lbl">每月 Allowance（RM）</label>'+
+     '<input class="inp" id="dvAllow" inputmode="decimal" value="'+dv.allowance+'">'+
+     '<div style="height:18px"></div>'+
+     '<button class="btn p" onclick="saveDriver()">储存司机设定</button>'+
+     (dv.phone?'<div style="height:9px"></div><button class="btn o" onclick="testWa()">试一下 WhatsApp</button>':'')+
+   '</div>'+
+   '<div class="h1s" style="margin-top:26px">帐号与密码</div>'+
    (S.users||[]).map(function(u,i){
      var me=u.name===S.user.name;
      return '<div class="card" style="padding:15px 16px">'+
@@ -802,6 +834,24 @@ function renderSettings(){
    '<div style="height:14px"></div>'+
    '<div class="hint" style="background:rgba(201,162,39,.07);border-color:rgba(201,162,39,.22);color:var(--gold2)">'+
      'PIN 一定要 4 位数字，而且不能跟别人重复。改完立刻生效，下次登入用新的。</div>';
+}
+function saveDriver(){
+  var p={name:document.getElementById('dvName').value,
+         phone:document.getElementById('dvPhone').value,
+         allowance:document.getElementById('dvAllow').value};
+  call('adminSetDriver',[AUTH,p]).then(function(r){
+    if(!r.ok){toast(r.msg,'bad');return}
+    if(S.boot&&S.boot.driver){S.boot.driver.name=p.name.trim();S.boot.driver.phone=r.phone;
+      S.boot.driver.allowance=parseFloat(p.allowance)||0}
+    toast(r.phone?'已储存 · '+r.phone:'已储存（电话留空）','ok');
+    loadSettings();
+  }).catch(function(e){toast(String(e.message||e),'bad')});
+}
+function testWa(){
+  var ph=(S.drv&&S.drv.phone)||'';
+  if(!ph){toast('还没设定电话','bad');return}
+  var t='V&P TRADING 测试讯息 — 如果你收到这则，代表一键通知已经设定好了。';
+  window.open('https://wa.me/'+ph+'?text='+encodeURIComponent(t),'_blank');
 }
 function peek(i){
   var el=document.getElementById('pv'+i);

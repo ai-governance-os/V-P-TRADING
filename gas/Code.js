@@ -158,6 +158,54 @@ function adminAddUser(adminPin, name, pin, role) {
   } catch (e) { return { ok: false, msg: String(e.message || e) }; } finally { lock.releaseLock(); }
 }
 
+/* ---------- 司机设定（限 admin） ---------- */
+function adminGetDriver(adminPin) {
+  var a = adminAuth_(adminPin);
+  if (!a) return { ok: false, msg: '只有 admin 可以看司机设定' };
+  var r = readTable_('DRIVER').rows[0] || {};
+  return {
+    ok: true, driver: {
+      name: String(r.DRIVER_NAME || ''),
+      phone: String(r.PHONE || '').replace(/[^0-9]/g, ''),
+      allowance: toNum_(r.ALLOWANCE_PER_MONTH)
+    }
+  };
+}
+
+function adminSetDriver(adminPin, p) {
+  var lock = LockService.getScriptLock(); lock.waitLock(15000);
+  try {
+    var a = adminAuth_(adminPin);
+    if (!a) return { ok: false, msg: '只有 admin 可以改司机设定' };
+    var name = String(p.name == null ? '' : p.name).trim();
+    var phone = String(p.phone == null ? '' : p.phone).replace(/[^0-9]/g, '');
+    var allow = toNum_(p.allowance);
+    if (!name) return { ok: false, msg: '请填司机名字' };
+    // 本地格式自动转国际格式：012-751 3005 → 60127513005
+    if (phone && phone.charAt(0) === '0') phone = '60' + phone.slice(1);
+    if (phone && (phone.length < 10 || phone.length > 15))
+      return { ok: false, msg: '电话号码看起来不完整。直接打本地号码就行（例如 0127513005），系统会自动转成 60127513005。' };
+    if (allow < 0) return { ok: false, msg: 'Allowance 不能是负数' };
+
+    var t = readTable_('DRIVER');
+    var row = t.rows[0];
+    if (!row) {
+      t.sheet.appendRow(t.head.map(function (h) {
+        return h === 'DRIVER_NAME' ? name : h === 'PHONE' ? phone
+          : h === 'ALLOWANCE_PER_MONTH' ? allow : h === 'ACTIVE' ? 'YES' : '';
+      }));
+    } else {
+      var col = function (c) { return t.head.indexOf(c) + 1; };
+      if (col('DRIVER_NAME') > 0) t.sheet.getRange(row.__row, col('DRIVER_NAME')).setValue(name);
+      // 电话强制存成文字，避免 Sheets 把它当数字（会掉开头的 0 或变科学记号）
+      if (col('PHONE') > 0) t.sheet.getRange(row.__row, col('PHONE')).setNumberFormat('@').setValue(phone);
+      if (col('ALLOWANCE_PER_MONTH') > 0) t.sheet.getRange(row.__row, col('ALLOWANCE_PER_MONTH')).setValue(allow);
+    }
+    clearBootCache_();
+    return { ok: true, phone: phone };
+  } catch (e) { return { ok: false, msg: String(e.message || e) }; } finally { lock.releaseLock(); }
+}
+
 function adminSetActive(adminPin, target, active) {
   var a = adminAuth_(adminPin);
   if (!a) return { ok: false, msg: '只有 admin 可以停用帐号' };
@@ -225,7 +273,7 @@ function buildBoot_() {
     currency: cfg.CURRENCY || 'RM',
     payOptions: String(cfg.PAY_STATUS_OPTIONS || 'OP,PC,PAID,PENDING').split(',').map(function (s) { return s.trim(); }),
     defaultPay: cfg.DEFAULT_PAY_STATUS || 'OP',
-    driver: { name: String(drv.DRIVER_NAME || 'UNCLE'), phone: String(drv.PHONE || cfg.DRIVER_PHONE || ''), allowance: toNum_(drv.ALLOWANCE_PER_MONTH) },
+    driver: { name: String(drv.DRIVER_NAME || ''), phone: String(drv.PHONE || '').replace(/[^0-9]/g, ''), allowance: toNum_(drv.ALLOWANCE_PER_MONTH) },
     setTypes: setTypes,
     people: people,
     branches: branches
@@ -352,9 +400,8 @@ function notifyDriver(ids) {
   var set = {}; (ids || []).forEach(function (i) { set[String(i)] = 1; });
   var picked = t.rows.filter(function (r) { return set[String(r.ORDER_ID)] && !isVoid_(r); });
   if (!picked.length) return { ok: false, msg: '没有选中的订单' };
-  var cfg = config_();
   var drv = readTable_('DRIVER').rows[0] || {};
-  var phone = String(drv.PHONE || cfg.DRIVER_PHONE || '').replace(/[^0-9]/g, '');
+  var phone = String(drv.PHONE || '').replace(/[^0-9]/g, '');
   return { ok: true, phone: phone, text: buildWaText_(picked), count: picked.length };
 }
 
