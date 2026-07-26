@@ -26,7 +26,7 @@ jobs:
       # 语法先过一遍，坏的程式不要推上去
       - name: 语法检查
         run: |
-          cp gas/Code.gs /tmp/Code.js
+          cp gas/Code.js /tmp/Code.js
           node --check /tmp/Code.js
           node -e "
             const fs=require('fs');
