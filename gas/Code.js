@@ -226,7 +226,7 @@ function migratePayment(adminPin) {
 
     var rng = sheet.getRange(first, 1, n, head.length);
     var v = rng.getValues();
-    var stat = { paid: 0, unpaid: 0, op: 0, pc: 0, dated: 0, noted: 0, skipped: 0, fixed: 0 };
+    var stat = { paid: 0, unpaid: 0, op: 0, pc: 0, dated: 0, noted: 0, skipped: 0, fixed: 0, noMethod: 0 };
 
     for (var i = 0; i < n; i++) {
       var s = String(v[i][cS] == null ? '' : v[i][cS]).trim().toUpperCase();
@@ -234,20 +234,6 @@ function migratePayment(adminPin) {
 
       var raw = String(v[i][cD] == null ? '' : v[i][cD]).trim();
       var src = cSrc >= 0 ? String(v[i][cSrc] == null ? '' : v[i][cSrc]) : '';
-      var method = '', paid = false;
-
-      // 修正旧版 INSTALL 的毛病：付款栏原本空白的，被一律写成了 OP。
-      // 真正的 OP 每一笔都有收款日期；日期栏完全空白的，其实是「还没收钱」。
-      if (s === 'OP' && !raw && src.indexOf('APP') !== 0) {
-        v[i][cS] = 'UNPAID'; v[i][cM] = ''; v[i][cD] = ''; v[i][cN] = '';
-        stat.unpaid++; stat.fixed++;
-        continue;
-      }
-
-      if (s === 'OP') { method = 'OP'; paid = true; }
-      else if (s === 'PC') { method = 'PC'; paid = true; }
-      else if (s === 'PENDING' || s === '') { paid = false; }
-      else { paid = !!raw; method = ''; }   // 没看过的写法：有日期就当已付
 
       // 从 "02.01.26 (HL Bank)" / "TNG EWALLET 07.01.26" / "19.05" 抽出日期与备注
       var iso = '', note = '';
@@ -268,6 +254,20 @@ function migratePayment(adminPin) {
         } else { note = raw; }
       }
       note = note.replace(/[()（）]/g, ' ').replace(/\band\b/gi, ' ').replace(/\s+/g, ' ').trim();
+
+      // ── 判定收了没有 ──
+      // OP / PC 只是「钱怎么进来的」，不代表收到了。真正的付款记录 = 有收款日期。
+      // 旧资料里 1010 笔写了方式的，1010 笔都有日期 —— 因为他们是钱到手才填那一行。
+      // 所以：抓不到日期 = 还没收到钱。
+      var method = (s === 'OP' || s === 'PC') ? s : '';
+      var paid = !!iso;
+      if (src.indexOf('APP') === 0) paid = !!iso || !!method;   // App 下的单另有把关，不动它
+
+      // 本来看起来像已收（写了方式）、但其实没有日期的，就是这次要救回来的
+      if (!paid && (method || s)) stat.fixed++;
+      if (!paid) { method = ''; iso = ''; note = ''; }
+      // 有日期但没写 OP/PC 的：方式就留空白，不替客户猜。他自己去 App 按一下补上。
+      if (paid && !method) stat.noMethod++;
 
       v[i][cS] = paid ? 'PAID' : 'UNPAID';
       v[i][cM] = paid ? method : '';

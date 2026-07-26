@@ -645,7 +645,8 @@ function paintList(rows){
       '<div class="s">'+esc(o.branch)+' · '+esc(o.date)+'</div></div>'+
       '<div class="amt">RM '+rm(o.total)+'</div></div>'+
       '<div class="r2"><span class="tag set">'+esc(o.setType)+' × '+o.qty+'</span>'+
-      (o.paid?'<span class="tag paid">已收 '+esc(o.method||'')+'</span>'
+      (o.paid?(o.method?'<span class="tag paid">已收 '+esc(o.method)+'</span>'
+                       :'<span class="tag paid">已收</span><span class="tag pend">方式没填</span>')
              :'<span class="tag pend">未收钱</span>')+
       (admin?'<span class="tag dlv">利 RM'+rm(o.mine)+'</span><span class="tag dlv">司 RM'+rm(o.fee)+'</span>':'')+
       (!o.paid?'<button class="tag paid" style="margin-left:auto;border:1px solid rgba(75,192,139,.3)" onclick="event.stopPropagation();askPay(\''+o.id+'\')">收到钱了</button>':'')+
@@ -656,7 +657,9 @@ function paintList(rows){
 var PY={id:'',method:'OP',date:'',note:''};
 function askPay(id){
   var o=findO(id);
-  PY={id:id,method:'OP',date:today(),note:''};
+  // 补方式的情况：日期和备注沿用旧的，方式留空强迫他自己选
+  PY=o&&o.paid ? {id:id,method:'',date:o.payDate||today(),note:o.payNote||''}
+               : {id:id,method:'OP',date:today(),note:''};
   drawPay(o);
 }
 function drawPay(o){
@@ -710,11 +713,14 @@ function openOrder(id){
      '<div class="lbl">收款</div>'+
      (o.paid
        ?'<div class="card" style="padding:13px 15px;margin-bottom:11px;background:rgba(75,192,139,.09);border-color:rgba(75,192,139,.3)">'+
-         '<div style="font-size:15px;color:var(--ok);font-weight:600;margin-bottom:5px">已收钱 · '+esc(o.method||'')+
-           '（'+(o.method==='PC'?'现金':'转账')+'）</div>'+
+         '<div style="font-size:15px;color:var(--ok);font-weight:600;margin-bottom:5px">已收钱'+
+           (o.method?' · '+esc(o.method)+'（'+(o.method==='PC'?'现金':'转账')+'）':'')+'</div>'+
          '<div style="font-size:13px;color:var(--dim)">日期：'+esc(o.payDate||'—')+
            (o.payNote?'　备注：'+esc(o.payNote):'')+'</div>'+
+         (o.method?'':'<div class="hint" style="margin-top:9px;background:rgba(226,104,95,.09);'+
+           'border-color:rgba(226,104,95,.3)">旧记录没写是转账还是现金，按下面补上就好。</div>')+
          '<div style="height:10px"></div>'+
+         (o.method?'':'<button class="tag paid" style="border:1px solid rgba(75,192,139,.3);margin-right:7px" onclick="askPay(\''+o.id+'\')">补上收款方式</button>')+
          '<button class="tag pend" style="border:1px solid rgba(226,104,95,.35)" onclick="undoPay(\''+o.id+'\')">按错了？改回未收</button>'+
         '</div>'
        :'<button class="btn p" style="padding:13px;font-size:15px;margin-bottom:11px" onclick="askPay(\''+o.id+'\')">收到钱了 — 记录收款</button>')+
@@ -1136,6 +1142,7 @@ function runMigrate(){
        '<div class="sumrow"><span class="k">　· 现金 PC</span><span class="v" style="font-size:16px">'+s.pc+'</span></div>'+
        '<div class="sumrow"><span class="k">还没收钱</span><span class="v" style="color:var(--bad)">'+s.unpaid+' 笔</span></div>'+
        (s.fixed?'<div class="sumrow"><span class="k">　· 修正回来的（本来被误记成已收）</span><span class="v" style="font-size:16px;color:var(--warn)">'+s.fixed+'</span></div>':'')+
+       (s.noMethod?'<div class="sumrow"><span class="k">收了但没写方式（等你补）</span><span class="v" style="font-size:16px;color:var(--warn)">'+s.noMethod+' 笔</span></div>':'')+
        (s.skipped?'<div class="sumrow"><span class="k">已是新格式（略过）</span><span class="v" style="font-size:16px">'+s.skipped+'</span></div>':'')+
      '</div>'+
      '<button class="btn p" onclick="closeSheet();S.dash=null;go(\'dash\')">去看未收款</button>'+
