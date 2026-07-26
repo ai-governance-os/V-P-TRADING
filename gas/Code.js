@@ -218,7 +218,7 @@ function migratePayment(adminPin) {
     var sheet = t.sheet, head = t.head;
     var cS = head.indexOf('PAY_STATUS'), cM = head.indexOf('PAY_METHOD'),
         cD = head.indexOf('PAY_DATE'), cN = head.indexOf('PAY_NOTE'),
-        cO = head.indexOf('DATE');
+        cO = head.indexOf('DATE'), cSrc = head.indexOf('SOURCE');
     if (cS < 0 || cM < 0 || cD < 0 || cN < 0) return { ok: false, msg: 'ORDERS 缺少付款栏位' };
 
     var first = t.headRow + 1, n = t.rows.length;
@@ -226,14 +226,24 @@ function migratePayment(adminPin) {
 
     var rng = sheet.getRange(first, 1, n, head.length);
     var v = rng.getValues();
-    var stat = { paid: 0, unpaid: 0, op: 0, pc: 0, dated: 0, noted: 0, skipped: 0 };
+    var stat = { paid: 0, unpaid: 0, op: 0, pc: 0, dated: 0, noted: 0, skipped: 0, fixed: 0 };
 
     for (var i = 0; i < n; i++) {
       var s = String(v[i][cS] == null ? '' : v[i][cS]).trim().toUpperCase();
       if (s === 'PAID' || s === 'UNPAID') { stat.skipped++; continue; }   // 已是新格式
 
       var raw = String(v[i][cD] == null ? '' : v[i][cD]).trim();
+      var src = cSrc >= 0 ? String(v[i][cSrc] == null ? '' : v[i][cSrc]) : '';
       var method = '', paid = false;
+
+      // 修正旧版 INSTALL 的毛病：付款栏原本空白的，被一律写成了 OP。
+      // 真正的 OP 每一笔都有收款日期；日期栏完全空白的，其实是「还没收钱」。
+      if (s === 'OP' && !raw && src.indexOf('APP') !== 0) {
+        v[i][cS] = 'UNPAID'; v[i][cM] = ''; v[i][cD] = ''; v[i][cN] = '';
+        stat.unpaid++; stat.fixed++;
+        continue;
+      }
+
       if (s === 'OP') { method = 'OP'; paid = true; }
       else if (s === 'PC') { method = 'PC'; paid = true; }
       else if (s === 'PENDING' || s === '') { paid = false; }
@@ -273,7 +283,7 @@ function migratePayment(adminPin) {
     return {
       ok: true, total: n, stat: stat,
       msg: '升级完成：共 ' + n + ' 笔｜已付 ' + stat.paid + '（OP ' + stat.op + ' · PC ' + stat.pc +
-           '）｜未付 ' + stat.unpaid + '｜已是新格式略过 ' + stat.skipped
+           '）｜未付 ' + stat.unpaid + '（其中 ' + stat.fixed + ' 笔是修正回来的）｜已是新格式略过 ' + stat.skipped
     };
   } catch (e) { return { ok: false, msg: String(e.message || e) }; } finally { lock.releaseLock(); }
 }
@@ -1173,7 +1183,7 @@ function writeOrders_(ss, rows) {
   rows.sort(function (a, b) { return a.month - b.month; });
   var data = rows.map(function (r, i) {
     return ['VP' + zero5_(i + 1), r.date, r.month, r.region, r.state, r.branch, r.brand, r.salesman,
-      r.detail, r.price, r.qty, r.total, r.mine, r.fee, r.pay || 'OP', r.payDate,
+      r.detail, r.price, r.qty, r.total, r.mine, r.fee, r.pay || 'UNPAID', r.payDate,
       'DELIVERED', r.note, r.src, 'ACTIVE', '', ''];
   });
   // App 新增的单接在历史後面，重新编号避免撞号

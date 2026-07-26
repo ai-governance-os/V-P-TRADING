@@ -1135,6 +1135,7 @@ function runMigrate(){
        '<div class="sumrow"><span class="k">　· 转账 OP</span><span class="v" style="font-size:16px">'+s.op+'</span></div>'+
        '<div class="sumrow"><span class="k">　· 现金 PC</span><span class="v" style="font-size:16px">'+s.pc+'</span></div>'+
        '<div class="sumrow"><span class="k">还没收钱</span><span class="v" style="color:var(--bad)">'+s.unpaid+' 笔</span></div>'+
+       (s.fixed?'<div class="sumrow"><span class="k">　· 修正回来的（本来被误记成已收）</span><span class="v" style="font-size:16px;color:var(--warn)">'+s.fixed+'</span></div>':'')+
        (s.skipped?'<div class="sumrow"><span class="k">已是新格式（略过）</span><span class="v" style="font-size:16px">'+s.skipped+'</span></div>':'')+
      '</div>'+
      '<button class="btn p" onclick="closeSheet();S.dash=null;go(\'dash\')">去看未收款</button>'+
