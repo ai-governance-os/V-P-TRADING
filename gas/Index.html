@@ -201,10 +201,13 @@ select.inp{appearance:none;background-image:linear-gradient(45deg,transparent 50
 .load{display:flex;align-items:center;justify-content:center;padding:52px}
 .spin{width:26px;height:26px;border:2px solid rgba(201,162,39,.18);border-top-color:var(--gold);border-radius:50%;animation:sp .75s linear infinite}
 @keyframes sp{to{transform:rotate(360deg)}}
-.toast{position:fixed;left:50%;transform:translateX(-50%) translateY(110px);bottom:calc(88px + var(--safe-b));z-index:200;
+/* 通知：永远不吃点击（pointer-events:none），收起时整个 hidden，不会挡住底部分页 */
+.toast{position:fixed;left:50%;transform:translateX(-50%) translateY(110px);bottom:calc(88px + var(--safe-b));
+  z-index:400;pointer-events:none;visibility:hidden;opacity:0;
   padding:14px 24px;border-radius:99px;background:#22222A;border:1px solid var(--line2);font-size:14.5px;
-  box-shadow:0 14px 40px rgba(0,0,0,.62);transition:transform .38s cubic-bezier(.22,1,.36,1);max-width:88vw;text-align:center}
-.toast.on{transform:translateX(-50%) translateY(0)}
+  box-shadow:0 14px 40px rgba(0,0,0,.62);max-width:88vw;text-align:center;
+  transition:transform .38s cubic-bezier(.22,1,.36,1),opacity .3s,visibility 0s linear .38s}
+.toast.on{transform:translateX(-50%) translateY(0);visibility:visible;opacity:1;transition-delay:0s}
 .toast.ok{border-color:rgba(75,192,139,.45)}.toast.bad{border-color:rgba(226,104,95,.45)}
 .sheet{position:fixed;inset:0;z-index:150;display:none}
 .sheet.on{display:block}
@@ -260,10 +263,24 @@ function call(fn,args){
 function rm(n){return (Math.round(n*100)/100).toLocaleString('en-MY',{minimumFractionDigits:2,maximumFractionDigits:2})}
 function rm0(n){return Math.round(n).toLocaleString('en-MY')}
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
-function toast(m,t){var e=document.getElementById('toast');e.textContent=m;e.className='toast on '+(t||'');
-  clearTimeout(e._t);e._t=setTimeout(function(){e.className='toast '+(t||'')},2600)}
-function openSheet(h){document.getElementById('sheetBody').innerHTML=h;document.getElementById('sheet').className='sheet on'}
-function closeSheet(){document.getElementById('sheet').className='sheet'}
+function hideToast(){var e=document.getElementById('toast');
+  if(!e)return; clearTimeout(e._t); e.className='toast'}
+function toast(m,t){var e=document.getElementById('toast');
+  if(!e)return;
+  e.textContent=m; e.className='toast on '+(t||'');
+  clearTimeout(e._t);
+  e._t=setTimeout(function(){ e.className='toast '+(t||'') },2600);
+}
+function openSheet(h){hideToast();document.getElementById('sheetBody').innerHTML=h;
+  document.getElementById('sheet').className='sheet on'}
+function closeSheet(){var s=document.getElementById('sheet');
+  if(!s)return; s.className='sheet';
+  // 收起后清空内容，避免旧的弹窗残留
+  setTimeout(function(){ if(s.className==='sheet'){var b=document.getElementById('sheetBody'); if(b)b.innerHTML=''} },400);
+}
+/* 保险：碰到画面任何地方就把通知收掉；返回键 / Esc 关弹窗 */
+document.addEventListener('pointerdown',function(){hideToast()},true);
+document.addEventListener('keydown',function(e){ if(e.key==='Escape'){hideToast();closeSheet()} });
 
 /* ================= 登入 ================= */
 var PIN='', BUSY=false, AUTH='';
@@ -354,7 +371,7 @@ function renderApp(){
   go(S.view,true);
 }
 function go(v,keep){
-  S.view=v;
+  S.view=v; hideToast();
   document.querySelectorAll('.view').forEach(function(e){e.className='view'});
   document.getElementById('v-'+v).className='view on';
   document.querySelectorAll('.nb').forEach(function(b){
@@ -809,9 +826,8 @@ function renderDash(){
      '<label class="lbl">存档 / 备份</label>'+
      '<div style="color:var(--dim);font-size:13px;line-height:1.7;margin-bottom:13px">'+
        '把某个月整个下载成 Excel 存在自己电脑。<br>'+
-       '订单明细、月结总览、司机抽成、分行小计，四个分页都在里面。</div>'+
+       '含本月数字、1 月到当月的累计，还有每月走势。</div>'+
      '<button class="btn o" style="padding:12px;font-size:14px" onclick="askMonthly()">下载月报 Excel →</button>'+
-     '<div class="hint" style="margin-top:11px">建议每个月做一次。这份档案不依赖网络也不依赖任何人，是你自己的底。</div>'+
    '</div>':'')+
 
    (d.months.length>1?'<div class="card"><label class="lbl">每月营业额</label>'+
@@ -1027,7 +1043,7 @@ function askMonthly(){
    '<div class="h1s" style="margin-bottom:16px">存一份在自己电脑</div>'+
    '<div class="card" style="padding:13px 15px;margin-bottom:16px">'+
      '<div style="font-size:13px;color:var(--dim);line-height:1.75">'+
-       '一个 Excel 档，四个分页：订单明细、月结总览、司机抽成、分行小计。<br>'+
+       '一个 Excel 档，五个分页：订单明细、月结总览（本月 + 年初到今累计）、每月走势、司机抽成、分行小计。<br>'+
        '<b style="color:var(--warn)">里面有「我的利润」，不要转发给司机。</b>要给司机的是「月结单」那一份。</div>'+
    '</div>'+
    '<label class="lbl">选月份</label>'+
@@ -1063,30 +1079,46 @@ function monthlyDetail(r){
   return a;
 }
 function monthlySummary(r){
-  var t=r.total;
+  var t=r.total, y=r.ytd||t, ytdLbl='1 月 – '+MONTHS[r.month]+' 累计';
   return [
     [r.company+' — '+r.monthName+' 月结总览'],
     ['产生时间',r.generated],
-    ['⚠ 本档案是当下的快照，正式记录以 App 为准。在这里改数字不会回到系统。'],
+    ['本档案是当下的快照，正式记录以 App 为准。在这里改数字不会回到系统。'],
     [],
+    ['','本月',ytdLbl],
     ['生意'],
-    ['订单笔数',t.orders],
-    ['总 set 数',t.sets],
-    ['营业额',t.income],
-    ['我的利润',t.mine],
+    ['订单笔数',t.orders,y.orders],
+    ['总 set 数',t.sets,y.sets],
+    ['营业额',t.income,y.income],
+    ['我的利润',t.mine,y.mine],
     [],
     ['收款'],
-    ['已收到',t.paid,t.paidN+' 笔'],
-    ['　· 转账 OP',t.op],
-    ['　· 现金 PC',t.pc],
-    ['还没收到',t.unpaid,t.unpaidN+' 笔'],
+    ['已收到',t.paid,y.paid],
+    ['　· 转账 OP',t.op,y.op],
+    ['　· 现金 PC',t.pc,y.pc],
+    ['还没收到',t.unpaid,y.unpaid],
+    ['还没收到（笔数）',t.unpaidN,y.unpaidN],
     [],
     ['司机 '+(r.driver||'')],
-    ['抽成',t.fee],
-    ['Allowance',r.allowance],
-    ['扣：司机代收现金',-t.cash],
-    ['应转账给司机',r.driverPayable]
+    ['抽成',t.fee,y.fee],
+    ['Allowance',r.allowance,r.allowance*(r.nMonths||1)],
+    ['扣：司机代收现金',-t.cash,-y.cash],
+    ['应转账给司机',r.driverPayable,r.ytdDriverPayable]
   ];
+}
+/** 每月走势：一行一个月，右边是逐月累计 */
+function monthlyTrend(r){
+  var a=[[ (r.company||'V&P TRADING')+' — 每月走势（到 '+MONTHS[r.month]+'为止）'],[],
+    ['月份','订单','SET','营业额','我的利润','司机抽成','已收','未收',
+     '累计营业额','累计利润','累计司机抽成']];
+  (r.months||[]).forEach(function(m){
+    a.push([MONTHS[m.m],m.orders,m.sets,m.income,m.mine,m.fee,m.paid,m.unpaid,
+      m.cumIncome,m.cumMine,m.cumFee]);
+  });
+  var y=r.ytd||r.total;
+  a.push([]);
+  a.push(['合计',y.orders,y.sets,y.income,y.mine,y.fee,y.paid,y.unpaid]);
+  return a;
 }
 function monthlyBranches(r){
   var a=[['BRANCH','订单','SET','营业额','我的利润','司机抽成','未收款']];
@@ -1108,8 +1140,13 @@ function buildMonthlyXlsx(X,r){
   X.utils.book_append_sheet(wb,d,'订单明细');
 
   var s=X.utils.aoa_to_sheet(monthlySummary(r));
-  s['!cols']=[{wch:24},{wch:14},{wch:12}];
+  s['!cols']=[{wch:26},{wch:15},{wch:18}];
   X.utils.book_append_sheet(wb,s,'月结总览');
+
+  var tr=X.utils.aoa_to_sheet(monthlyTrend(r));
+  tr['!cols']=[{wch:9},{wch:8},{wch:8},{wch:13},{wch:12},{wch:12},{wch:13},{wch:12},
+               {wch:15},{wch:14},{wch:15}];
+  X.utils.book_append_sheet(wb,tr,'每月走势');
 
   if(r.statement&&r.statement.ok){
     var save=S.bill; S.bill=r.statement;
@@ -1129,7 +1166,7 @@ function buildMonthlyXlsx(X,r){
 }
 function csvMonthly(r){
   var esc2=function(v){v=String(v==null?'':v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v};
-  var out=monthlySummary(r).concat([[],[]],monthlyDetail(r),[[],[]],monthlyBranches(r));
+  var out=monthlySummary(r).concat([[],[]],monthlyTrend(r),[[],[]],monthlyDetail(r),[[],[]],monthlyBranches(r));
   var s='﻿'+out.map(function(row){return (row||[]).map(esc2).join(',')}).join('\r\n');
   dl(new Blob([s],{type:'text/csv;charset=utf-8'}),monthlyName(r,'csv'));
   closeSheet();

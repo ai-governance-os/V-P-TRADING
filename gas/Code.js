@@ -790,17 +790,38 @@ function getMonthlyReport(opt) {
   var dv = readTable_('DRIVER').rows[0] || {};
   var rules = readTable_('DRIVER_RULE').rows;
 
-  var rows = [], byBranch = {}, bySet = {};
-  var tot = { orders: 0, sets: 0, income: 0, mine: 0, fee: 0,
-              paid: 0, paidN: 0, unpaid: 0, unpaidN: 0, op: 0, pc: 0, cash: 0 };
+  var rows = [], byBranch = {}, bySet = {}, byMonth = {};
+  var blank_ = function () {
+    return { orders: 0, sets: 0, income: 0, mine: 0, fee: 0,
+             paid: 0, paidN: 0, unpaid: 0, unpaidN: 0, op: 0, pc: 0, cash: 0 };
+  };
+  var add_ = function (o, v) {
+    o.orders++; o.sets += v.qty; o.income += v.inc; o.mine += v.mine; o.fee += v.fee;
+    if (v.paid) {
+      o.paid += v.inc; o.paidN++;
+      if (v.method === 'OP') o.op += v.inc;
+      if (v.method === 'PC') { o.pc += v.inc; if (v.fee) o.cash += v.inc; }
+    } else { o.unpaid += v.inc; o.unpaidN++; }
+  };
+  var tot = blank_(), ytd = blank_();
 
   t.rows.forEach(function (r) {
-    if (isVoid_(r) || toNum_(r.MONTH) !== month) return;
+    if (isVoid_(r)) return;
+    var m = toNum_(r.MONTH);
+    if (m > month) return;                      // 只算到这个月为止
+
     var qty = toNum_(r.QTY), price = toNum_(r.UNIT_PRICE),
         inc = toNum_(r.TOTAL_INCOME), mine = toNum_(r.MY_INCOME), fee = toNum_(r.DRIVER_FEE);
     var paid = payPaid_(r), method = payMethod_(r);
-    var b = String(r.BRANCH || '-'), st = String(r.SET_TYPE || '-');
+    var v = { qty: qty, inc: inc, mine: mine, fee: fee, paid: paid, method: method };
 
+    add_(ytd, v);                                // 1 月到本月的累计
+    byMonth[m] = byMonth[m] || blank_();
+    add_(byMonth[m], v);
+
+    if (m !== month) return;                     // 以下只做本月的明细
+
+    var b = String(r.BRANCH || '-'), st = String(r.SET_TYPE || '-');
     rows.push({
       date: fmtDate_(r.DATE), state: String(r.STATE || ''), branch: b,
       salesman: String(r.SALESMAN || ''), sets: qty, price: price,
@@ -809,10 +830,7 @@ function getMonthlyReport(opt) {
       payNote: String(r.PAY_NOTE || ''), paid: paid,
       delivery: String(r.DELIVERY_STATUS || ''), note: String(r.NOTE || '')
     });
-
-    tot.orders++; tot.sets += qty; tot.income += inc; tot.mine += mine; tot.fee += fee;
-    if (paid) { tot.paid += inc; tot.paidN++; if (method === 'OP') tot.op += inc; if (method === 'PC') { tot.pc += inc; if (fee) tot.cash += inc; } }
-    else { tot.unpaid += inc; tot.unpaidN++; }
+    add_(tot, v);
 
     byBranch[b] = byBranch[b] || { name: b, orders: 0, sets: 0, income: 0, mine: 0, fee: 0, unpaid: 0 };
     byBranch[b].orders++; byBranch[b].sets += qty; byBranch[b].income += inc;
@@ -829,14 +847,34 @@ function getMonthlyReport(opt) {
 
   var K = function (o) { return Object.keys(o).map(function (k) { return o[k]; }); };
   var r2 = function (n) { return Math.round(n * 100) / 100; };
-  ['income', 'mine', 'fee', 'paid', 'unpaid', 'op', 'pc', 'cash'].forEach(function (k) { tot[k] = r2(tot[k]); });
+  var MONEY = ['income', 'mine', 'fee', 'paid', 'unpaid', 'op', 'pc', 'cash'];
+  var round_ = function (o) { MONEY.forEach(function (k) { o[k] = r2(o[k]); }); return o; };
+  round_(tot); round_(ytd);
+
+  // 每月走势（含逐月累计）
+  var run = 0, runMine = 0, runFee = 0;
+  var months = [];
+  for (var mi = 1; mi <= month; mi++) {
+    var b2 = byMonth[mi]; if (!b2) continue;
+    round_(b2);
+    run += b2.income; runMine += b2.mine; runFee += b2.fee;
+    months.push({
+      m: mi, name: statMonthName_(mi), orders: b2.orders, sets: b2.sets,
+      income: b2.income, mine: b2.mine, fee: b2.fee,
+      paid: b2.paid, unpaid: b2.unpaid,
+      cumIncome: r2(run), cumMine: r2(runMine), cumFee: r2(runFee)
+    });
+  }
 
   var allowance = toNum_(dv.ALLOWANCE_PER_MONTH);
+  var nMonths = months.length || 1;
   return {
     ok: true, month: month, monthName: statMonthName_(month),
     company: config_().COMPANY || 'V&P TRADING',
     driver: String(dv.DRIVER_NAME || ''),
     rows: rows, total: tot,
+    ytd: ytd, months: months, nMonths: nMonths,
+    ytdDriverPayable: r2(ytd.fee + allowance * nMonths - ytd.cash),
     allowance: allowance,
     driverPayable: r2(tot.fee + allowance - tot.cash),
     branches: K(byBranch).sort(function (a, b) { return b.income - a.income; }),
