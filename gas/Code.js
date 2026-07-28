@@ -1044,6 +1044,109 @@ function fmtDate_(v) {
 }
 
 /* ---------- 新客户 / 新分行 ---------- */
+/* ---------- 改分行 ----------
+   分行换了，州属 / 区域 / 品牌 / 司机抽成都要跟着换。
+   例：PERODUA KAJANG PRIMA（雪州，RM2.50/set）→ PERODUA RASAH JAYA（森州，10%）
+       5 set × RM 35：抽成从 RM 12.50 变成 RM 17.50。
+   所以一定要先给使用者看清楚再存。
+------------------------------- */
+function branchInfo_(name) {
+  var hit = null;
+  readTable_('BRANCH').rows.forEach(function (r) {
+    if (up_(r.BRANCH) === up_(name)) hit = r;
+  });
+  if (!hit) return null;
+  return {
+    branch: String(hit.BRANCH).trim(), brand: String(hit.BRAND || '').trim(),
+    state: String(hit.STATE || '').trim(), region: String(hit.REGION || '').trim()
+  };
+}
+
+/** 先算给使用者看：改了之后抽成会变多少 */
+function previewBranch(p) {
+  var t = readTable_('ORDERS');
+  var hit = findOrder_(t, p && p.id);
+  if (!hit) return { ok: false, msg: '找不到订单' };
+  var to = branchInfo_(p && p.branch);
+  if (!to) return { ok: false, msg: '名单里没有这间分行：' + (p && p.branch) };
+
+  var qty = toNum_(hit.QTY), price = toNum_(hit.UNIT_PRICE), st = String(hit.SET_TYPE);
+  var newFee = calcDriverFee_(to.region, to.state, st, qty, price);
+  var oldFee = toNum_(hit.DRIVER_FEE);
+  return {
+    ok: true,
+    salesman: String(hit.SALESMAN || ''),
+    from: {
+      branch: String(hit.BRANCH || ''), state: String(hit.STATE || ''),
+      region: String(hit.REGION || ''), fee: oldFee
+    },
+    to: { branch: to.branch, state: to.state, region: to.region, brand: to.brand, fee: newFee },
+    feeChanged: Math.abs(newFee - oldFee) > 0.005,
+    diff: Math.round((newFee - oldFee) * 100) / 100
+  };
+}
+
+/** 真的改。alsoSalesman = true 时，顺便把这个销售员的主分行也换过去 */
+function changeBranch(p) {
+  var t = readTable_('ORDERS');
+  var hit = findOrder_(t, p && p.id);
+  if (!hit) return { ok: false, msg: '找不到订单' };
+  var to = branchInfo_(p && p.branch);
+  if (!to) return { ok: false, msg: '名单里没有这间分行：' + (p && p.branch) };
+  if (up_(hit.BRANCH) === up_(to.branch)) return { ok: false, msg: '本来就是这间分行' };
+
+  var qty = toNum_(hit.QTY), price = toNum_(hit.UNIT_PRICE), st = String(hit.SET_TYPE);
+  var newFee = calcDriverFee_(to.region, to.state, st, qty, price);
+  var oldFee = toNum_(hit.DRIVER_FEE);
+  var salesman = up_(hit.SALESMAN);
+
+  var r = withLock_(function () {
+    return patchRow_(t.sheet, t.head, hit.__row, hit.ORDER_ID, {
+      BRANCH: to.branch, BRAND: to.brand, STATE: to.state,
+      REGION: to.region, DRIVER_FEE: newFee
+    });
+  });
+  if (!r.ok) return r;
+
+  var moved = false;
+  if (p && p.alsoSalesman && salesman) moved = moveSalesman_(salesman, to);
+
+  clearBootCache_();
+  return {
+    ok: true, oldFee: oldFee, newFee: newFee,
+    diff: Math.round((newFee - oldFee) * 100) / 100,
+    salesman: salesman, salesmanMoved: moved
+  };
+}
+
+/** 把销售员的「主要分行」★ 移到新分行；名单里没有就补一行 */
+function moveSalesman_(salesman, to) {
+  try {
+    var t = readTable_('SALESMAN');
+    var star = t.head.indexOf('主要分行') + 1;
+    if (star <= 0) return false;
+    var mine = t.rows.filter(function (r) { return up_(r.SALESMAN) === up_(salesman); });
+    var target = null;
+    mine.forEach(function (r) { if (up_(r.BRANCH) === up_(to.branch)) target = r; });
+
+    return withLock_(function () {
+      mine.forEach(function (r) {
+        if (String(r['主要分行'] || '').trim()) t.sheet.getRange(r.__row, star).setValue('');
+      });
+      if (target) {
+        t.sheet.getRange(target.__row, star).setValue('★');
+      } else {
+        t.sheet.appendRow(t.head.map(function (h) {
+          return h === 'SALESMAN' ? up_(salesman) : h === 'BRANCH' ? to.branch
+            : h === 'BRAND' ? to.brand : h === 'STATE' ? to.state : h === 'REGION' ? to.region
+              : h === '历史笔数' ? 0 : h === '主要分行' ? '★' : '';
+        }));
+      }
+      return { ok: true };
+    }).ok === true;
+  } catch (e) { return false; }
+}
+
 function addSalesman(p) {
   try {
     var bt = readTable_('BRANCH');

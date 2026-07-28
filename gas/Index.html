@@ -712,6 +712,90 @@ function undoPay(id){
   }).catch(function(e){toast(String(e.message||e),'bad')});
 }
 
+/* --- 换分行：先看抽成会变多少，确认才存 --- */
+var BR={id:'',q:'',pick:null,also:false};
+function askBranch(id){
+  var o=findO(id); if(!o)return;
+  BR={id:id,q:'',pick:null,also:false,salesman:o.salesman,from:o.branch};
+  drawBranch();
+}
+function drawBranch(){
+  var list=(S.boot.branches||[]).filter(function(b){
+    if(!BR.q)return true;
+    return b.branch.toUpperCase().indexOf(BR.q.toUpperCase())>=0;
+  }).slice(0,40);
+  openSheet('<div style="font-family:var(--sf);font-size:25px;margin-bottom:3px">换分行</div>'+
+   '<div class="h1s" style="margin-bottom:16px">'+esc(BR.salesman)+' · 目前 '+esc(BR.from)+'</div>'+
+   '<input class="inp" id="brq" placeholder="打分行名字找…" value="'+esc(BR.q)+'" '+
+     'oninput="BR.q=this.value;drawBranchList()" style="margin-bottom:12px">'+
+   '<div id="brlist">'+branchRows(list)+'</div>'+
+   '<div id="brpv"></div>'+
+   '<div style="height:12px"></div><button class="btn o" onclick="closeSheet()">取消</button>');
+  setTimeout(function(){var n=document.getElementById('brq');if(n)n.focus()},250);
+}
+function branchRows(list){
+  if(!list.length)return '<div class="empty" style="padding:26px 0">找不到这间分行</div>';
+  return list.map(function(b){
+    var on=BR.pick&&BR.pick.branch===b.branch;
+    return '<button class="oi" style="width:100%;text-align:left;margin-bottom:7px;'+
+      (on?'border-color:var(--gold);background:var(--goldsoft)':'')+'" '+
+      'onclick="pickBranch(\''+esc(b.branch).replace(/'/g,"\\'")+'\')">'+
+      '<div class="b">'+esc(b.branch)+'</div>'+
+      '<div class="s">'+esc(b.state||'')+(b.region?' · '+esc(b.region):'')+'</div></button>'}).join('');
+}
+function drawBranchList(){
+  var el=document.getElementById('brlist'); if(!el)return;
+  var list=(S.boot.branches||[]).filter(function(b){
+    if(!BR.q)return true;
+    return b.branch.toUpperCase().indexOf(BR.q.toUpperCase())>=0}).slice(0,40);
+  el.innerHTML=branchRows(list);
+}
+function pickBranch(name){
+  var pv=document.getElementById('brpv');
+  if(pv)pv.innerHTML='<div class="load"><div class="spin"></div></div>';
+  call('previewBranch',[{id:BR.id,branch:name}]).then(function(r){
+    if(!r.ok){toast(r.msg,'bad');if(pv)pv.innerHTML='';return}
+    BR.pick=r.to; BR.prev=r;
+    drawBranchList();
+    var warn=r.feeChanged;
+    document.getElementById('brpv').innerHTML=
+     '<div class="card" style="margin-top:14px;'+
+       (warn?'background:rgba(233,168,53,.10);border-color:rgba(233,168,53,.34)':'')+'">'+
+       '<label class="lbl"'+(warn?' style="color:var(--warn)"':'')+'>改了会变成这样</label>'+
+       '<div class="sumrow"><span class="k">分行</span><span class="v" style="font-size:15px">'+esc(r.to.branch)+'</span></div>'+
+       '<div class="sumrow"><span class="k">州属</span><span class="v" style="font-size:15px">'+esc(r.from.state||'—')+' → '+esc(r.to.state||'—')+'</span></div>'+
+       (warn
+         ?'<div class="sumrow"><span class="k" style="color:var(--warn)">司机抽成</span>'+
+            '<span class="v" style="color:var(--warn)">RM '+rm(r.from.fee)+' → RM '+rm(r.to.fee)+'</span></div>'+
+          '<div class="hint" style="margin-top:9px;background:rgba(233,168,53,.09);border-color:rgba(233,168,53,.3)">'+
+            '两地的抽成规则不一样，'+(r.diff>0?'TAN 这笔会多拿 RM '+rm(r.diff):'TAN 这笔会少拿 RM '+rm(-r.diff))+'。</div>'
+         :'<div class="sumrow"><span class="k">司机抽成</span><span class="v" style="font-size:15px">RM '+rm(r.to.fee)+'（不变）</span></div>')+
+       '<div style="height:13px"></div>'+
+       '<label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer">'+
+         '<input type="checkbox" id="brAlso" '+(BR.also?'checked':'')+' onchange="BR.also=this.checked" '+
+           'style="width:20px;height:20px;flex:0 0 20px;margin-top:2px;accent-color:var(--gold)">'+
+         '<span style="font-size:13.5px;line-height:1.6">以后 <b>'+esc(BR.salesman)+'</b> 都算 '+esc(r.to.branch)+
+           '<br><span style="color:var(--dim2);font-size:12.5px">下单打名字时会自动带这间，不用每次改</span></span>'+
+       '</label>'+
+       '<div style="height:14px"></div>'+
+       '<button class="btn p" onclick="saveBranch()">确定换过去</button>'+
+     '</div>';
+  }).catch(function(e){toast(String(e.message||e),'bad')});
+}
+function saveBranch(){
+  if(!BR.pick){toast('先选一间分行','bad');return}
+  call('changeBranch',[{id:BR.id,branch:BR.pick.branch,alsoSalesman:BR.also}]).then(function(r){
+    if(!r.ok){toast(r.msg,'bad');return}
+    closeSheet();
+    var m='已改成 '+BR.pick.branch;
+    if(Math.abs(r.diff)>0.005)m+='，抽成 RM '+rm(r.oldFee)+' → RM '+rm(r.newFee);
+    if(r.salesmanMoved)m+='（名单也更新了）';
+    toast(m,'ok');
+    S.boot=null; S.dash=null;
+    call('bootstrap',[]).then(function(b){S.boot=b;loadList()}).catch(function(){loadList()});
+  }).catch(function(e){toast(String(e.message||e),'bad')});
+}
+
 /* --- 订单详情 / 编辑 / 作废 --- */
 function findO(id){var o=null;(S.orders||[]).concat(S.pending||[]).forEach(function(x){if(x.id===id)o=x});return o}
 function openOrder(id){
@@ -727,6 +811,13 @@ function openOrder(id){
      '<div class="sumrow"><span class="k">司机抽成</span><span class="v" style="color:var(--warn)"><span class="cur">RM</span>'+rm(o.fee)+'</span></div>':'')+
    '</div>'+
    (canEdit?(
+     '<label class="lbl">分行</label>'+
+     '<div class="card" style="padding:13px 15px;margin-bottom:14px">'+
+       '<div style="font-size:15px;font-weight:600;margin-bottom:3px">'+esc(o.branch)+'</div>'+
+       '<div style="font-size:12.5px;color:var(--dim2);margin-bottom:11px">'+esc(o.state||'')+
+         (o.region?' · '+esc(o.region):'')+'</div>'+
+       '<button class="tag dlv" style="border:1px solid var(--line2)" onclick="askBranch(\''+o.id+'\')">换一间分行</button>'+
+     '</div>'+
      '<label class="lbl">修改</label>'+
      '<div class="row" style="margin-bottom:11px">'+
        '<div><div class="lbl" style="letter-spacing:.14em">数量</div><input class="inp" id="eQ" inputmode="numeric" value="'+o.qty+'"></div>'+
