@@ -88,6 +88,54 @@ function ensureCols_(name, cols) {
 
 function isVoid_(r) { return up_(r.STATUS) === 'VOID'; }
 
+
+/* ---------- 并发保护 ----------
+   锁只包住「写」那一刻。读资料请在呼叫 withLock_ 之前做好 ——
+   把读放进锁里会让一次收款抓着锁五到八秒，别人就撞到 Lock timeout。
+--------------------------------- */
+function friendlyErr_(e) {
+  var m = String((e && e.message) || e || '');
+  if (/lock/i.test(m)) return '有人同时在存资料，请等两秒再按一次';
+  if (/timed?\s*out|deadline|exceeded maximum execution/i.test(m)) return '网络有点慢，请再试一次';
+  if (/permission|authoriz/i.test(m)) return '权限不足，请用 admin 重新登入再试';
+  return m || '存档失败，请再试一次';
+}
+
+/** 试着拿锁，拿不到回传 false（不抛例外）。 */
+function tryLock_(lock, ms) {
+  try { lock.waitLock(ms); return true; } catch (e) { return false; }
+}
+
+/** 拿锁 → 跑 fn → 放锁。拿不到会自动重试两次。 */
+function withLock_(fn) {
+  var lock = LockService.getScriptLock(), got = false;
+  for (var i = 0; i < 3 && !got; i++) {
+    try { lock.waitLock(i === 0 ? 8000 : 5000); got = true; }
+    catch (e) { if (i < 2) Utilities.sleep(400 + i * 500); }
+  }
+  if (!got) return { ok: false, msg: '有人同时在存资料，请等两秒再按一次' };
+  try { return fn(); }
+  catch (e) { return { ok: false, msg: friendlyErr_(e) }; }
+  finally { try { lock.releaseLock(); } catch (e2) { } }
+}
+
+/** 锁内用：读单行 → 核对单号没被别人动过 → 套用修改 → 整行写回。一读一写。 */
+function patchRow_(sheet, head, row, orderId, patch) {
+  var rng = sheet.getRange(row, 1, 1, head.length);
+  var v = rng.getValues()[0];
+  var idc = head.indexOf('ORDER_ID');
+  if (idc >= 0 && orderId != null &&
+      String(v[idc]).trim() !== String(orderId).trim())
+    return { ok: false, msg: '这笔订单刚刚被别人改过，请重新整理后再试一次' };
+  var touched = false;
+  Object.keys(patch).forEach(function (k) {
+    var c = head.indexOf(k);
+    if (c >= 0) { v[c] = patch[k]; touched = true; }
+  });
+  if (touched) rng.setValues([v]);
+  return { ok: true };
+}
+
 /* ---------- 付款状态 ----------
  * 客户的原始写法：OP = Online Pay、PC = Pay Cash，两者都代表「已付」；空白 = 还没付。
  * 新模型把「状态」和「方式」分开：
@@ -134,8 +182,9 @@ function adminListUsers(adminPin) {
 }
 
 function adminSetPin(adminPin, target, newPin) {
-  var lock = LockService.getScriptLock(); lock.waitLock(15000);
+  var lock = LockService.getScriptLock();
   try {
+    if (!tryLock_(lock, 15000)) return { ok: false, msg: '有人同时在存资料，请等两秒再按一次' };
     var a = adminAuth_(adminPin);
     if (!a) return { ok: false, msg: '只有 admin 可以改密码' };
     if (!validPin_(newPin)) return { ok: false, msg: 'PIN 必须是 4 位数字' };
@@ -150,13 +199,14 @@ function adminSetPin(adminPin, target, newPin) {
     if (c <= 0) return { ok: false, msg: 'USERS 分页找不到 PIN 栏' };
     t.sheet.getRange(hit.__row, c).setValue(String(newPin).trim());
     return { ok: true };
-  } catch (e) { return { ok: false, msg: String(e.message || e) }; } finally { lock.releaseLock(); }
+  } catch (e) { return { ok: false, msg: friendlyErr_(e) }; } finally { try { lock.releaseLock(); } catch (e2) { } }
 }
 
 /** 改帐号名字（例如 UNCLE → TAN） */
 function adminRenameUser(adminPin, target, newName) {
-  var lock = LockService.getScriptLock(); lock.waitLock(15000);
+  var lock = LockService.getScriptLock();
   try {
+    if (!tryLock_(lock, 15000)) return { ok: false, msg: '有人同时在存资料，请等两秒再按一次' };
     var a = adminAuth_(adminPin);
     if (!a) return { ok: false, msg: '只有 admin 可以改名字' };
     newName = String(newName == null ? '' : newName).trim();
@@ -173,12 +223,13 @@ function adminRenameUser(adminPin, target, newName) {
     if (c <= 0) return { ok: false, msg: 'USERS 分页找不到 NAME 栏' };
     t.sheet.getRange(hit.__row, c).setValue(newName);
     return { ok: true, name: newName };
-  } catch (e) { return { ok: false, msg: String(e.message || e) }; } finally { lock.releaseLock(); }
+  } catch (e) { return { ok: false, msg: friendlyErr_(e) }; } finally { try { lock.releaseLock(); } catch (e2) { } }
 }
 
 function adminAddUser(adminPin, name, pin, role) {
-  var lock = LockService.getScriptLock(); lock.waitLock(15000);
+  var lock = LockService.getScriptLock();
   try {
+    if (!tryLock_(lock, 15000)) return { ok: false, msg: '有人同时在存资料，请等两秒再按一次' };
     var a = adminAuth_(adminPin);
     if (!a) return { ok: false, msg: '只有 admin 可以新增帐号' };
     name = String(name || '').trim();
@@ -197,7 +248,7 @@ function adminAddUser(adminPin, name, pin, role) {
         : h === 'ROLE' ? role : h === 'ACTIVE' ? 'YES' : '';
     }));
     return { ok: true };
-  } catch (e) { return { ok: false, msg: String(e.message || e) }; } finally { lock.releaseLock(); }
+  } catch (e) { return { ok: false, msg: friendlyErr_(e) }; } finally { try { lock.releaseLock(); } catch (e2) { } }
 }
 
 /* ---------- 一次性资料升级：旧的 OP/PC 付款写法 → 新模型 ---------- *
@@ -209,8 +260,9 @@ function adminAddUser(adminPin, name, pin, role) {
  * 可以重复执行，已经是新格式的行会自动略过。
  */
 function migratePayment(adminPin) {
-  var lock = LockService.getScriptLock(); lock.waitLock(120000);
+  var lock = LockService.getScriptLock();
   try {
+    if (!tryLock_(lock, 120000)) return { ok: false, msg: '有人同时在存资料，请等两秒再按一次' };
     if (adminPin !== undefined && !adminAuth_(adminPin))
       return { ok: false, msg: '只有 admin 可以执行资料升级' };
 
@@ -285,7 +337,7 @@ function migratePayment(adminPin) {
       msg: '升级完成：共 ' + n + ' 笔｜已付 ' + stat.paid + '（OP ' + stat.op + ' · PC ' + stat.pc +
            '）｜未付 ' + stat.unpaid + '（其中 ' + stat.fixed + ' 笔是修正回来的）｜已是新格式略过 ' + stat.skipped
     };
-  } catch (e) { return { ok: false, msg: String(e.message || e) }; } finally { lock.releaseLock(); }
+  } catch (e) { return { ok: false, msg: friendlyErr_(e) }; } finally { try { lock.releaseLock(); } catch (e2) { } }
 }
 
 /* ---------- 司机设定（限 admin） ---------- */
@@ -303,8 +355,9 @@ function adminGetDriver(adminPin) {
 }
 
 function adminSetDriver(adminPin, p) {
-  var lock = LockService.getScriptLock(); lock.waitLock(15000);
+  var lock = LockService.getScriptLock();
   try {
+    if (!tryLock_(lock, 15000)) return { ok: false, msg: '有人同时在存资料，请等两秒再按一次' };
     var a = adminAuth_(adminPin);
     if (!a) return { ok: false, msg: '只有 admin 可以改司机设定' };
     var name = String(p.name == null ? '' : p.name).trim();
@@ -333,7 +386,7 @@ function adminSetDriver(adminPin, p) {
     }
     clearBootCache_();
     return { ok: true, phone: phone };
-  } catch (e) { return { ok: false, msg: String(e.message || e) }; } finally { lock.releaseLock(); }
+  } catch (e) { return { ok: false, msg: friendlyErr_(e) }; } finally { try { lock.releaseLock(); } catch (e2) { } }
 }
 
 function adminSetActive(adminPin, target, active) {
@@ -445,34 +498,32 @@ function quote(p) {
 
 /* ---------- 写入订单 ---------- */
 function submitOrder(p) {
-  var lock = LockService.getScriptLock();
-  lock.waitLock(20000);
-  try {
-    var t = readTable_('ORDERS');
-    var sheet = t.sheet, head = t.head;
-    var qty = toNum_(p.qty), price = toNum_(p.price);
-    if (!p.salesman) throw new Error('请选择销售员');
-    if (!p.branch) throw new Error('请选择 BRANCH');
-    if (!p.setType) throw new Error('请选择 SET');
-    if (qty <= 0) throw new Error('数量必须大于 0');
+  var qty = toNum_(p.qty), price = toNum_(p.price);
+  if (!p.salesman) return { ok: false, msg: '请选择销售员' };
+  if (!p.branch) return { ok: false, msg: '请选择 BRANCH' };
+  if (!p.setType) return { ok: false, msg: '请选择 SET' };
+  if (qty <= 0) return { ok: false, msg: '数量必须大于 0' };
 
-    var total = (p.totalOverride !== '' && p.totalOverride != null)
-      ? toNum_(p.totalOverride) : Math.round(qty * price * 100) / 100;
-    var mine = (p.myIncomeOverride !== '' && p.myIncomeOverride != null)
-      ? toNum_(p.myIncomeOverride) : Math.round(qty * toNum_(p.profitPerSet) * 100) / 100;
-    var fee = (p.driverFeeOverride !== '' && p.driverFeeOverride != null)
-      ? toNum_(p.driverFeeOverride) : calcDriverFee_(p.region, p.state, p.setType, qty, price);
+  var t = readTable_('ORDERS');
+  var sheet = t.sheet, head = t.head;
 
-    // 下一个 ORDER_ID
-    var maxN = 0;
-    t.rows.forEach(function (r) {
-      var m = String(r.ORDER_ID || '').match(/VP(\d+)/);
-      if (m) maxN = Math.max(maxN, parseInt(m[1], 10));
-    });
-    var id = 'VP' + String(maxN + 1).padStart(5, '0');
+  var total = (p.totalOverride !== '' && p.totalOverride != null)
+    ? toNum_(p.totalOverride) : Math.round(qty * price * 100) / 100;
+  var mine = (p.myIncomeOverride !== '' && p.myIncomeOverride != null)
+    ? toNum_(p.myIncomeOverride) : Math.round(qty * toNum_(p.profitPerSet) * 100) / 100;
+  var fee = (p.driverFeeOverride !== '' && p.driverFeeOverride != null)
+    ? toNum_(p.driverFeeOverride) : calcDriverFee_(p.region, p.state, p.setType, qty, price);
 
-    var d = p.date ? new Date(p.date) : new Date();
-    var rec = {
+  var maxN = 0;
+  t.rows.forEach(function (r) {
+    var m = String(r.ORDER_ID || '').match(/VP(\d+)/);
+    if (m) maxN = Math.max(maxN, parseInt(m[1], 10));
+  });
+
+  var d = p.date ? new Date(p.date) : new Date();
+  var paid = up_(p.payStatus) === 'PAID';
+  var mk = function (id) {
+    return {
       ORDER_ID: id,
       DATE: Utilities.formatDate(d, TZ, 'yyyy-MM-dd'),
       MONTH: d.getMonth() + 1,
@@ -480,23 +531,34 @@ function submitOrder(p) {
       SALESMAN: up_(p.salesman), SET_TYPE: p.setType,
       UNIT_PRICE: price, QTY: qty,
       TOTAL_INCOME: total, MY_INCOME: mine, DRIVER_FEE: fee,
-      PAY_STATUS: (up_(p.payStatus) === 'PAID' ? 'PAID' : 'UNPAID'),
-      PAY_METHOD: (up_(p.payStatus) === 'PAID' ? up_(p.payMethod) : ''),
-      PAY_DATE: (up_(p.payStatus) === 'PAID' ? (p.payDate || Utilities.formatDate(d, TZ, 'yyyy-MM-dd')) : ''),
-      PAY_NOTE: (up_(p.payStatus) === 'PAID' ? String(p.payNote || '').trim() : ''),
+      PAY_STATUS: paid ? 'PAID' : 'UNPAID',
+      PAY_METHOD: paid ? up_(p.payMethod) : '',
+      PAY_DATE: paid ? (p.payDate || Utilities.formatDate(d, TZ, 'yyyy-MM-dd')) : '',
+      PAY_NOTE: paid ? String(p.payNote || '').trim() : '',
       DELIVERY_STATUS: 'PENDING', NOTE: p.note || '',
       SOURCE: 'APP·' + (p.by || '')
     };
-    var line = head.map(function (h) { return rec.hasOwnProperty(h) ? rec[h] : ''; });
-    sheet.appendRow(line);
+  };
 
-    return { ok: true, order: rec, wa: buildWaText_([rec]) };
-  } catch (e) {
-    return { ok: false, msg: String(e.message || e) };
-  } finally {
-    lock.releaseLock();
-  }
+  var rec = null;
+  var r = withLock_(function () {
+    // 拿到锁才定单号 —— 免得两个人同时下单撞到同一号
+    var last = sheet.getLastRow();
+    if (last >= 3) {
+      var idc = head.indexOf('ORDER_ID') + 1;
+      if (idc > 0) {
+        var m2 = String(sheet.getRange(last, idc).getValue() || '').match(/VP(\d+)/);
+        if (m2) maxN = Math.max(maxN, parseInt(m2[1], 10));
+      }
+    }
+    rec = mk('VP' + String(maxN + 1).padStart(5, '0'));
+    sheet.appendRow(head.map(function (h) { return rec.hasOwnProperty(h) ? rec[h] : ''; }));
+    return { ok: true };
+  });
+  if (!r.ok) return r;
+  return { ok: true, order: rec, wa: buildWaText_([rec]) };
 }
+
 
 /* ---------- WhatsApp 文字 ---------- */
 function buildWaText_(orders) {
@@ -543,13 +605,29 @@ function markDelivered(ids) {
   var t = readTable_('ORDERS');
   var col = t.head.indexOf('DELIVERY_STATUS') + 1;
   if (col <= 0) return { ok: false, msg: '找不到 DELIVERY_STATUS 栏' };
-  var set = {}; (ids || []).forEach(function (i) { set[String(i)] = 1; });
-  var n = 0;
-  t.rows.forEach(function (r) {
-    if (set[String(r.ORDER_ID)]) { t.sheet.getRange(r.__row, col).setValue('DELIVERED'); n++; }
+  var want = {}; (ids || []).forEach(function (i) { want[String(i)] = 1; });
+  var rows = t.rows.filter(function (r) { return want[String(r.ORDER_ID)]; });
+  if (!rows.length) return { ok: false, msg: '没有选中的订单' };
+
+  // 连续的列合并成一个区块写，减少往返
+  rows.sort(function (a, b) { return a.__row - b.__row; });
+  var blocks = [], cur = null;
+  rows.forEach(function (r) {
+    if (cur && r.__row === cur.from + cur.n) { cur.n++; }
+    else { cur = { from: r.__row, n: 1 }; blocks.push(cur); }
   });
-  return { ok: true, n: n };
+  var res = withLock_(function () {
+    blocks.forEach(function (b) {
+      var vals = [];
+      for (var i = 0; i < b.n; i++) vals.push(['DELIVERED']);
+      t.sheet.getRange(b.from, col, b.n, 1).setValues(vals);
+    });
+    return { ok: true };
+  });
+  if (!res.ok) return res;
+  return { ok: true, n: rows.length };
 }
+
 
 /* ---------- 作废 / 编辑订单 ---------- */
 
@@ -570,93 +648,89 @@ function findOrder_(t, id) {
 
 /** 作废（不真删，保留稽核轨迹） */
 function voidOrder(id, by) {
-  var lock = LockService.getScriptLock(); lock.waitLock(20000);
-  try {
-    var t = ensureCols_('ORDERS', ['STATUS', 'VOID_BY', 'VOID_AT']);
-    var hit = findOrder_(t, id);
-    if (!hit) return { ok: false, msg: '找不到订单' };
-    var set = function (col, v) { var c = t.head.indexOf(col) + 1; if (c > 0) t.sheet.getRange(hit.__row, c).setValue(v); };
-    set('STATUS', 'VOID');
-    set('VOID_BY', by || '');
-    set('VOID_AT', Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd HH:mm'));
-    return { ok: true };
-  } catch (e) { return { ok: false, msg: String(e.message || e) }; } finally { lock.releaseLock(); }
+  var t = ensureCols_('ORDERS', ['STATUS', 'VOID_BY', 'VOID_AT']);
+  var hit = findOrder_(t, id);
+  if (!hit) return { ok: false, msg: '找不到订单' };
+  var stamp = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd HH:mm');
+  return withLock_(function () {
+    return patchRow_(t.sheet, t.head, hit.__row, hit.ORDER_ID, {
+      STATUS: 'VOID', VOID_BY: by || '', VOID_AT: stamp
+    });
+  });
 }
 
-/** 复原作废 */
 function unvoidOrder(id) {
   var t = ensureCols_('ORDERS', ['STATUS', 'VOID_BY', 'VOID_AT']);
   var hit = findOrder_(t, id);
   if (!hit) return { ok: false, msg: '找不到订单' };
-  var c = t.head.indexOf('STATUS') + 1;
-  if (c > 0) t.sheet.getRange(hit.__row, c).setValue('ACTIVE');
-  return { ok: true };
+  return withLock_(function () {
+    return patchRow_(t.sheet, t.head, hit.__row, hit.ORDER_ID, { STATUS: 'ACTIVE' });
+  });
 }
 
-/** 修改订单（数量 / 售价 / 付款 / 备注），金额自动重算 */
 function updateOrder(p) {
-  var lock = LockService.getScriptLock(); lock.waitLock(20000);
-  try {
-    var t = readTable_('ORDERS');
-    var hit = findOrder_(t, p.id);
-    if (!hit) return { ok: false, msg: '找不到订单' };
-    var qty = toNum_(p.qty), price = toNum_(p.price);
-    if (qty <= 0) return { ok: false, msg: '数量必须大于 0' };
-    if (price <= 0) return { ok: false, msg: '售价必须大于 0' };
-    var setType = p.setType || String(hit.SET_TYPE);
+  var t = readTable_('ORDERS');
+  var hit = findOrder_(t, p.id);
+  if (!hit) return { ok: false, msg: '找不到订单' };
+  var qty = toNum_(p.qty), price = toNum_(p.price);
+  if (qty <= 0) return { ok: false, msg: '数量必须大于 0' };
+  if (price <= 0) return { ok: false, msg: '售价必须大于 0' };
+  var setType = p.setType || String(hit.SET_TYPE);
 
-    var total = (p.totalOverride !== '' && p.totalOverride != null)
-      ? toNum_(p.totalOverride) : Math.round(qty * price * 100) / 100;
-    var pps = profitFor_(setType, price);
-    if (pps === null) {
-      // 价目表查不到（特别价）→ 沿用这笔原本的每 set 利润，按新数量等比换算
-      var oq = toNum_(hit.QTY);
-      pps = oq > 0 ? toNum_(hit.MY_INCOME) / oq : 0;
-    }
-    var mine = (p.myIncomeOverride !== '' && p.myIncomeOverride != null)
-      ? toNum_(p.myIncomeOverride) : Math.round(pps * qty * 100) / 100;
-    var fee = (p.driverFeeOverride !== '' && p.driverFeeOverride != null)
-      ? toNum_(p.driverFeeOverride)
-      : calcDriverFee_(hit.REGION, hit.STATE, setType, qty, price);
+  var total = (p.totalOverride !== '' && p.totalOverride != null)
+    ? toNum_(p.totalOverride) : Math.round(qty * price * 100) / 100;
+  var pps = profitFor_(setType, price);
+  if (pps === null) {
+    var oq = toNum_(hit.QTY);
+    pps = oq > 0 ? toNum_(hit.MY_INCOME) / oq : 0;
+  }
+  var mine = (p.myIncomeOverride !== '' && p.myIncomeOverride != null)
+    ? toNum_(p.myIncomeOverride) : Math.round(pps * qty * 100) / 100;
+  var fee = (p.driverFeeOverride !== '' && p.driverFeeOverride != null)
+    ? toNum_(p.driverFeeOverride)
+    : calcDriverFee_(hit.REGION, hit.STATE, setType, qty, price);
 
-    var set = function (col, v) { var c = t.head.indexOf(col) + 1; if (c > 0) t.sheet.getRange(hit.__row, c).setValue(v); };
-    set('SET_TYPE', setType); set('UNIT_PRICE', price); set('QTY', qty);
-    set('TOTAL_INCOME', total); set('MY_INCOME', mine); set('DRIVER_FEE', fee);
-    if (p.payStatus) set('PAY_STATUS', p.payStatus);
-    if (p.note != null) set('NOTE', p.note);
-    return { ok: true, total: total, mine: mine, fee: fee };
-  } catch (e) { return { ok: false, msg: String(e.message || e) }; } finally { lock.releaseLock(); }
+  var patch = {
+    SET_TYPE: setType, UNIT_PRICE: price, QTY: qty,
+    TOTAL_INCOME: total, MY_INCOME: mine, DRIVER_FEE: fee
+  };
+  if (p.payStatus) patch.PAY_STATUS = p.payStatus;
+  if (p.note != null) patch.NOTE = p.note;
+
+  var r = withLock_(function () {
+    return patchRow_(t.sheet, t.head, hit.__row, hit.ORDER_ID, patch);
+  });
+  if (!r.ok) return r;
+  return { ok: true, total: total, mine: mine, fee: fee };
 }
 
-/** 标记已付：要指定日期与方式（OP=Online Pay / PC=Pay Cash），备注选填 */
 function markPaid(p) {
-  var lock = LockService.getScriptLock(); lock.waitLock(15000);
-  try {
-    var t = ensureCols_('ORDERS', ['PAY_METHOD', 'PAY_NOTE']);
-    var hit = findOrder_(t, p && p.id);
-    if (!hit) return { ok: false, msg: '找不到订单' };
-    var method = up_(p.method);
-    if (method !== 'OP' && method !== 'PC') return { ok: false, msg: '请选付款方式（OP 或 PC）' };
-    var d = String(p.date || '').trim() || Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return { ok: false, msg: '日期格式不对' };
-    var set = function (col, v) { var c = t.head.indexOf(col) + 1; if (c > 0) t.sheet.getRange(hit.__row, c).setValue(v); };
-    set('PAY_STATUS', 'PAID'); set('PAY_METHOD', method);
-    set('PAY_DATE', d); set('PAY_NOTE', String(p.note == null ? '' : p.note).trim());
-    return { ok: true };
-  } catch (e) { return { ok: false, msg: String(e.message || e) }; } finally { lock.releaseLock(); }
+  // 读、找、验证 —— 全部在锁外面做
+  var t = ensureCols_('ORDERS', ['PAY_METHOD', 'PAY_NOTE']);
+  var hit = findOrder_(t, p && p.id);
+  if (!hit) return { ok: false, msg: '找不到订单' };
+  var method = up_(p && p.method);
+  if (method !== 'OP' && method !== 'PC') return { ok: false, msg: '请选收款方式（OP 转账 或 PC 现金）' };
+  var d = String((p && p.date) || '').trim() || Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return { ok: false, msg: '日期格式不对' };
+  var note = String((p && p.note) == null ? '' : p.note).trim();
+
+  return withLock_(function () {
+    return patchRow_(t.sheet, t.head, hit.__row, hit.ORDER_ID, {
+      PAY_STATUS: 'PAID', PAY_METHOD: method, PAY_DATE: d, PAY_NOTE: note
+    });
+  });
 }
 
-/** 改回未付（按错了可以救） */
 function markUnpaid(id) {
-  var lock = LockService.getScriptLock(); lock.waitLock(15000);
-  try {
-    var t = ensureCols_('ORDERS', ['PAY_METHOD', 'PAY_NOTE']);
-    var hit = findOrder_(t, id);
-    if (!hit) return { ok: false, msg: '找不到订单' };
-    var set = function (col, v) { var c = t.head.indexOf(col) + 1; if (c > 0) t.sheet.getRange(hit.__row, c).setValue(v); };
-    set('PAY_STATUS', 'UNPAID'); set('PAY_METHOD', ''); set('PAY_DATE', ''); set('PAY_NOTE', '');
-    return { ok: true };
-  } catch (e) { return { ok: false, msg: String(e.message || e) }; } finally { lock.releaseLock(); }
+  var t = ensureCols_('ORDERS', ['PAY_METHOD', 'PAY_NOTE']);
+  var hit = findOrder_(t, id);
+  if (!hit) return { ok: false, msg: '找不到订单' };
+  return withLock_(function () {
+    return patchRow_(t.sheet, t.head, hit.__row, hit.ORDER_ID, {
+      PAY_STATUS: 'UNPAID', PAY_METHOD: '', PAY_DATE: '', PAY_NOTE: ''
+    });
+  });
 }
 
 /** 未收款清单：依分行分组，附拖欠天数 */
