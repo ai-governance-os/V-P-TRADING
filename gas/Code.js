@@ -419,8 +419,12 @@ function buildBoot_() {
   sp.forEach(function (r) {
     var k = String(r.SET_TYPE).trim();
     if (!setTypes[k]) setTypes[k] = [];
-    setTypes[k].push({ price: toNum_(r.UNIT_PRICE), profit: toNum_(r.PROFIT_PER_SET),
-                       desc: String(r['说明'] || r.DESC || '').trim() });
+    var pr = toNum_(r.UNIT_PRICE);
+    setTypes[k].push({
+      price: pr, profit: toNum_(r.PROFIT_PER_SET),
+      // 表里填了就以表为准；没填就用内建的（客户自己讲过的那几组）
+      desc: String(r['说明'] || r.DESC || '').trim() || (DESC_FALLBACK_[k + '|' + pr] || '')
+    });
   });
   Object.keys(setTypes).forEach(function (k) {
     setTypes[k].sort(function (a, b) { return a.price - b.price; });
@@ -463,6 +467,18 @@ function buildBoot_() {
     branches: branches
   };
 }
+
+/* 客户在确认文件里自己写过的：同一个 SET 不同售价 = 不同货。
+   SET_PRICE 分页的「说明」栏填了就盖过这里，这只是还没填之前的预设。 */
+var DESC_FALLBACK_ = {
+  '9 ITEMS|35': '普通雨伞',
+  '9 ITEMS|36': '普通雨伞',
+  '9 ITEMS|40': '好的雨伞',
+  '10 ITEMS|50': '好的雨伞',
+  'UMBRELLA|12': '普通雨伞',
+  'UMBRELLA|20': '好的雨伞',
+  'UMBRELLA|26': '客制 logo 雨伞'
+};
 
 /* ---------- 计算：司机抽成 ---------- */
 function calcDriverFee_(region, state, setType, qty, price) {
