@@ -244,9 +244,31 @@ var S={user:null,boot:null,view:'order',sel:{},dash:null,orders:[],month:0,bill:
 var F={ // 表单
   salesman:'',branch:'',brand:'',state:'',region:'',setType:'',price:0,profit:0,qty:1,
   paid:false,payMethod:'OP',payDate:'',payNote:'',
+  drvColor:'',drvGrade:'',drvNote:'',drvDesc:'',
   note:'',ovTotal:'',ovMine:'',ovFee:''
 };
+/** 记住上次选的颜色，同一间分行多半一样 */
+function rememberDrv(){ try{ if(F.drvColor) LASTCOLOR=F.drvColor }catch(e){} }
+var LASTCOLOR='';
+/** 单卖伞/袋 → pcs，其他 → set。跟送货单一致。 */
+function unitOf(st){
+  var t=String(st||'').toUpperCase();
+  if(t.indexOf('+')>=0)return 'set';
+  if(/UMBRELLA|BAG/.test(t)&&!/ITEM/.test(t))return 'pcs';
+  return 'set';
+}
+/** 送货单上那句（颜色+款式，没选就用价目表说明） */
+function drvPreview(){
+  var b=[];
+  if(F.drvColor)b.push(F.drvColor);
+  if(F.drvGrade)b.push(F.drvGrade);
+  if(!b.length&&F.drvDesc)b.push(F.drvDesc);
+  if(!b.length)return '';
+  return F.setType+'（'+b.join('')+'）';
+}
 function today(){var d=new Date();return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2)}
+var COLORS=['黑色','红色','蓝色','白色'];
+var GRADES=['普通雨伞','好的雨伞'];
 var MONTHS=['','一月','二月','三月','四月','五月','六月','七月','八月','九月','十月','十一月','十二月'];
 
 /* ================= 后端桥接（本地预览有 mock） ================= */
@@ -419,11 +441,29 @@ function renderOrder(){
        '<small>赚 RM'+t.profit+'</small></button>'}).join('')+'</div></div>'):'')+
   '</div>'+
 
-  '<div class="card"><label class="lbl">数量（set）</label>'+
+  '<div class="card"><label class="lbl">数量（'+(F.setType?unitOf(F.setType):'set')+'）</label>'+
    '<div class="step"><button onclick="qty(-1)">−</button>'+
    '<input type="number" inputmode="numeric" value="'+F.qty+'" oninput="F.qty=Math.max(0,parseInt(this.value)||0);softSum()">'+
    '<button onclick="qty(1)">+</button></div>'+
-   '<div style="margin-top:14px"><label class="lbl">收钱了吗</label><div class="chips">'+
+   '<div style="height:16px"></div>'+
+   '<div style="border-top:1px solid var(--line);padding-top:14px">'+
+     '<label class="lbl" style="color:var(--gold2)">给司机看的</label>'+
+     '<div style="color:var(--dim2);font-size:12px;margin:-4px 0 10px">会印在 WhatsApp 送货单上</div>'+
+     '<div class="chips" style="margin-bottom:10px">'+
+       COLORS.map(function(c){return '<button class="chip'+(F.drvColor===c?' on':'')+
+         '" onclick="F.drvColor=(F.drvColor===\''+c+'\'?\'\':\''+c+'\');rememberDrv();renderOrder()">'+c+'</button>'}).join('')+
+     '</div>'+
+     '<div class="chips" style="margin-bottom:10px">'+
+       GRADES.map(function(g){return '<button class="chip'+(F.drvGrade===g?' on':'')+
+         '" onclick="F.drvGrade=(F.drvGrade===\''+g+'\'?\'\':\''+g+'\');renderOrder()">'+g+'</button>'}).join('')+
+       (F.drvDesc&&!F.drvGrade?'<span style="align-self:center;font-size:12px;color:var(--dim2);margin-left:4px">价目表：'+esc(F.drvDesc)+'</span>':'')+
+     '</div>'+
+     '<input class="inp" placeholder="特别交代（少用）例如 不要 Thermos" value="'+esc(F.drvNote)+'" '+
+       'oninput="F.drvNote=this.value" style="font-size:14px">'+
+     (drvPreview()?'<div class="hint" style="margin-top:10px;background:rgba(201,162,39,.07);border-color:rgba(201,162,39,.22);color:var(--gold2)">'+
+        '司机会看到：'+esc(drvPreview())+'</div>':'')+
+   '</div>'+
+   '<div style="margin-top:16px"><label class="lbl">收钱了吗</label><div class="chips">'+
      '<button class="chip'+(F.paid?'':' on')+'" onclick="F.paid=false;renderOrder()">还没收</button>'+
      '<button class="chip'+(F.paid?' on':'')+'" onclick="setPaidNow()">已经收了</button>'+
    '</div>'+
@@ -500,9 +540,17 @@ function acPick(n){ setPerson(n,S.boot.people[n][0]); renderOrder(); }
 function setPerson(n,b){ F.salesman=n; F.branch=b.branch; F.brand=b.brand; F.state=b.state; F.region=b.region; }
 function pickBranch(i){var b=S.boot.people[F.salesman][i];
   F.branch=b.branch;F.brand=b.brand;F.state=b.state;F.region=b.region;renderOrder()}
+function applyTier(t){
+  F.price=t.price; F.profit=t.profit; F.drvDesc=t.desc||'';
+  // 价目表写了「普通雨伞 / 好的雨伞」就自动亮那一颗，省得每次点
+  var g=GRADES.filter(function(x){return F.drvDesc===x})[0];
+  F.drvGrade = g || '';
+}
 function pickSet(t){F.setType=t;var ts=S.boot.setTypes[t];
-  if(ts&&ts.length===1){F.price=ts[0].price;F.profit=ts[0].profit}else{F.price=0;F.profit=0}renderOrder()}
-function pickPrice(i){var t=S.boot.setTypes[F.setType][i];F.price=t.price;F.profit=t.profit;renderOrder()}
+  if(ts&&ts.length===1){applyTier(ts[0])}else{F.price=0;F.profit=0;F.drvDesc='';F.drvGrade=''}
+  if(!F.drvColor&&LASTCOLOR)F.drvColor=LASTCOLOR;
+  renderOrder()}
+function pickPrice(i){applyTier(S.boot.setTypes[F.setType][i]);renderOrder()}
 
 /* --- 新增销售员 / 新分行 --- */
 var NB={mode:'old',branch:'',state:'',name:''};
@@ -604,6 +652,7 @@ function submit(){
   call('submitOrder',[{salesman:F.salesman,branch:F.branch,brand:F.brand,state:F.state,region:F.region,
     setType:F.setType,price:F.price,profitPerSet:F.profit,qty:F.qty,note:F.note,
     payStatus:F.paid?'PAID':'UNPAID',payMethod:F.payMethod,payDate:F.payDate||today(),payNote:F.payNote,
+    drvColor:F.drvColor,drvGrade:F.drvGrade||F.drvDesc,drvNote:F.drvNote,
     totalOverride:F.ovTotal,myIncomeOverride:F.ovMine,driverFeeOverride:F.ovFee,by:S.user.name}])
   .then(function(r){
     btn.removeAttribute('disabled');btn.textContent='确认下单';
@@ -612,6 +661,7 @@ function submit(){
     F.setType='';F.price=0;F.profit=0;F.qty=1;F.ovTotal='';F.ovMine='';F.ovFee='';F.note='';
     F.salesman='';F.branch='';F.state='';F.region='';F.brand='';
     F.paid=false;F.payMethod='OP';F.payDate='';F.payNote='';
+    F.drvGrade='';F.drvNote='';F.drvDesc='';   // 颜色留着，下一单多半一样
     renderOrder();
   }).catch(function(e){btn.removeAttribute('disabled');btn.textContent='确认下单';toast(String(e.message||e),'bad')});
 }

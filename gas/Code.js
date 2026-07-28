@@ -419,7 +419,8 @@ function buildBoot_() {
   sp.forEach(function (r) {
     var k = String(r.SET_TYPE).trim();
     if (!setTypes[k]) setTypes[k] = [];
-    setTypes[k].push({ price: toNum_(r.UNIT_PRICE), profit: toNum_(r.PROFIT_PER_SET) });
+    setTypes[k].push({ price: toNum_(r.UNIT_PRICE), profit: toNum_(r.PROFIT_PER_SET),
+                       desc: String(r['说明'] || r.DESC || '').trim() });
   });
   Object.keys(setTypes).forEach(function (k) {
     setTypes[k].sort(function (a, b) { return a.price - b.price; });
@@ -504,7 +505,7 @@ function submitOrder(p) {
   if (!p.setType) return { ok: false, msg: '请选择 SET' };
   if (qty <= 0) return { ok: false, msg: '数量必须大于 0' };
 
-  var t = readTable_('ORDERS');
+  var t = ensureCols_('ORDERS', ['DRV_COLOR', 'DRV_GRADE', 'DRV_NOTE']);
   var sheet = t.sheet, head = t.head;
 
   var total = (p.totalOverride !== '' && p.totalOverride != null)
@@ -535,6 +536,9 @@ function submitOrder(p) {
       PAY_METHOD: paid ? up_(p.payMethod) : '',
       PAY_DATE: paid ? (p.payDate || Utilities.formatDate(d, TZ, 'yyyy-MM-dd')) : '',
       PAY_NOTE: paid ? String(p.payNote || '').trim() : '',
+      DRV_COLOR: String(p.drvColor || '').trim(),
+      DRV_GRADE: String(p.drvGrade || '').trim(),
+      DRV_NOTE: String(p.drvNote || '').trim(),
       DELIVERY_STATUS: 'PENDING', NOTE: p.note || '',
       SOURCE: 'APP·' + (p.by || '')
     };
@@ -561,33 +565,64 @@ function submitOrder(p) {
 
 
 /* ---------- WhatsApp 文字 ---------- */
+/** 单卖雨伞、袋子这类单品用 pcs；goodie bag 之类套装用 set。TAN 的习惯。 */
+function unitOf_(setType) {
+  var t = up_(setType);
+  if (t.indexOf('+') >= 0) return 'set';          // UMBRELLA + BAG 算一组
+  if (/UMBRELLA|BAG/.test(t) && !/ITEM/.test(t)) return 'pcs';
+  return 'set';
+}
+
+/** 送货单上那句中文：颜色 + 款式 + 价目表说明，能凑几个凑几个 */
+function goodsDesc_(o) {
+  var bits = [];
+  var c = String(o.DRV_COLOR || '').trim();
+  var g = String(o.DRV_GRADE || '').trim();
+  if (c) bits.push(c);
+  if (g) bits.push(g);
+  if (!bits.length) {
+    var d = String(o.DRV_DESC || '').trim();     // 下单时从价目表带过来的
+    if (d) bits.push(d);
+  }
+  return bits.length ? '（' + bits.join('') + '）' : '';
+}
+
 function buildWaText_(orders) {
   var cfg = config_();
   var co = cfg.COMPANY || 'V&P TRADING';
-  var L = ['*' + co + ' — 送货单*', ''];
-  var byBranch = {};
+  var L = ['*' + co + ' — 送货单*',
+           Utilities.formatDate(new Date(), TZ, 'dd/MM/yyyy'), ''];
+
+  var byBranch = {}, order = [];
   orders.forEach(function (o) {
-    var k = o.BRANCH;
-    if (!byBranch[k]) byBranch[k] = [];
+    var k = String(o.BRANCH || '-');
+    if (!byBranch[k]) { byBranch[k] = []; order.push(k); }
     byBranch[k].push(o);
   });
-  var i = 1;
-  Object.keys(byBranch).forEach(function (b) {
-    L.push(i + '. *' + b + '*');
+
+  order.forEach(function (b) {
+    L.push('*' + b + '*');
     byBranch[b].forEach(function (o) {
-      L.push('   • ' + o.SALESMAN + ' — ' + o.SET_TYPE + ' × ' + o.QTY + ' set');
+      var qty = toNum_(o.QTY), price = toNum_(o.UNIT_PRICE), tot = toNum_(o.TOTAL_INCOME);
+      L.push(String(o.SALESMAN || '') + ' — ' + String(o.SET_TYPE || '') + goodsDesc_(o));
+      L.push('RM ' + price + ' × ' + qty + ' ' + unitOf_(o.SET_TYPE) +
+             ' = RM ' + (Math.round(tot * 100) / 100));
+      var note = String(o.DRV_NOTE || '').trim();
+      if (note) L.push('＊ ' + note);
+      L.push(payPaid_(o) ? '已收' : '未收钱 RM ' + (Math.round(tot * 100) / 100));
+      L.push('');
     });
-    L.push('');
-    i++;
   });
+
   var totalSets = orders.reduce(function (a, o) { return a + toNum_(o.QTY); }, 0);
   var totalFee = orders.reduce(function (a, o) { return a + toNum_(o.DRIVER_FEE); }, 0);
-  L.push('共 ' + orders.length + ' 单 / ' + totalSets + ' set');
-  L.push('抽成：RM ' + totalFee.toFixed(2));
-  L.push('');
-  L.push('日期：' + Utilities.formatDate(new Date(), TZ, 'dd/MM/yyyy'));
+  var totalAmt = orders.reduce(function (a, o) { return a + toNum_(o.TOTAL_INCOME); }, 0);
+  L.push('―――');
+  L.push('共 ' + orders.length + ' 单 · ' + totalSets + ' 件 · RM ' + (Math.round(totalAmt * 100) / 100));
+  L.push('你的抽成：RM ' + totalFee.toFixed(2));
   return L.join('\n');
 }
+
 
 /** 指定订单 ID 生成通知文字 */
 function notifyDriver(ids) {
@@ -1030,7 +1065,9 @@ function getOrders(opt) {
       paid: payPaid_(r), method: payMethod_(r), payDate: fmtDate_(r.PAY_DATE),
       payNote: String(r.PAY_NOTE || ''),
       delivery: String(r.DELIVERY_STATUS || ''), region: String(r.REGION || ''),
-      state: String(r.STATE || ''), note: String(r.NOTE || ''), status: up_(r.STATUS) || 'ACTIVE'
+      state: String(r.STATE || ''), note: String(r.NOTE || ''), status: up_(r.STATUS) || 'ACTIVE',
+      drvColor: String(r.DRV_COLOR || ''), drvGrade: String(r.DRV_GRADE || ''),
+      drvNote: String(r.DRV_NOTE || '')
     });
     if (out.length >= (opt.limit || 300)) break;
   }
@@ -1235,8 +1272,9 @@ function INSTALL() {
   rows.forEach(function (r) { r.fee = driverFee_(r.region, r.state, r.detail, r.qty, r.price); });
 
   var keptN = writeOrders_(ss, rows);
-  writeSheet_(ss, 'SET_PRICE', ['SET_TYPE', 'UNIT_PRICE', 'PROFIT_PER_SET', '历史笔数', 'ACTIVE'], setPrice,
-    '● 价目表（可改）：App 依 SET_TYPE + UNIT_PRICE 查出每 set 利润。改这里 App 立刻生效。');
+  writeSheet_(ss, 'SET_PRICE', ['SET_TYPE', 'UNIT_PRICE', 'PROFIT_PER_SET', '说明', '历史笔数', 'ACTIVE'],
+    setPrice.map(function (r) { return [r[0], r[1], r[2], SET_DESC_[up_(r[0]) + '|' + r[1]] || '', r[3], r[4]]; }),
+    '● 价目表（可改）：App 依 SET_TYPE + UNIT_PRICE 查出每 set 利润。「说明」会印在给司机的送货单上（例：普通雨伞 / 好的雨伞）。改这里 App 立刻生效。');
   writeSheet_(ss, 'BRANCH', ['BRANCH', 'BRAND', 'STATE', 'REGION', '历史笔数', 'ACTIVE'], buildBranch_(rows),
     '● Branch 名单（已统一写法）。新增分行直接加一行。');
   writeSheet_(ss, 'SALESMAN', ['SALESMAN', 'BRANCH', 'BRAND', 'STATE', 'REGION', '历史笔数', '最后下单月', '主要分行'],
@@ -1434,9 +1472,21 @@ function buildSalesman_(rows) {
 }
 
 /* ---------- 写表 ---------- */
+/* 客户自己讲过的：同一个 SET 不同售价 = 不同货。这句会印给司机看。 */
+var SET_DESC_ = {
+  '9 ITEMS|35': '普通雨伞',
+  '9 ITEMS|36': '普通雨伞',
+  '9 ITEMS|40': '好的雨伞',
+  '10 ITEMS|50': '好的雨伞',
+  'UMBRELLA|12': '普通雨伞',
+  'UMBRELLA|20': '好的雨伞',
+  'UMBRELLA|26': '客制 logo 雨伞'
+};
+
 var ORDER_HEAD = ['ORDER_ID', 'DATE', 'MONTH', 'REGION', 'STATE', 'BRANCH', 'BRAND', 'SALESMAN',
   'SET_TYPE', 'UNIT_PRICE', 'QTY', 'TOTAL_INCOME', 'MY_INCOME', 'DRIVER_FEE',
-  'PAY_STATUS', 'PAY_DATE', 'DELIVERY_STATUS', 'NOTE', 'SOURCE',
+  'PAY_STATUS', 'PAY_DATE', 'DRV_COLOR', 'DRV_GRADE', 'DRV_NOTE',
+  'DELIVERY_STATUS', 'NOTE', 'SOURCE',
   'STATUS', 'VOID_BY', 'VOID_AT'];
 
 /** 读出现有 ORDERS 里由 App 新增的单（SOURCE 以 APP 开头），重跑 INSTALL 时不能弄丢 */
@@ -1468,7 +1518,7 @@ function writeOrders_(ss, rows) {
   var data = rows.map(function (r, i) {
     return ['VP' + zero5_(i + 1), r.date, r.month, r.region, r.state, r.branch, r.brand, r.salesman,
       r.detail, r.price, r.qty, r.total, r.mine, r.fee, r.pay || 'UNPAID', r.payDate,
-      'DELIVERED', r.note, r.src, 'ACTIVE', '', ''];
+      '', '', '', 'DELIVERED', r.note, r.src, 'ACTIVE', '', ''];
   });
   // App 新增的单接在历史後面，重新编号避免撞号
   kept.forEach(function (row, i) { row[0] = 'VP' + zero5_(data.length + i + 1); data.push(row); });
