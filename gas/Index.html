@@ -267,7 +267,7 @@ function drvPreview(){
   return F.setType+'（'+b.join('')+'）';
 }
 function today(){var d=new Date();return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2)}
-var COLORS=['黑色','红色','蓝色','白色'];
+var COLORS=['黑色','红色'];
 var GRADES=['普通雨伞','好的雨伞'];
 var MONTHS=['','一月','二月','三月','四月','五月','六月','七月','八月','九月','十月','十一月','十二月'];
 
@@ -540,6 +540,13 @@ function acPick(n){ setPerson(n,S.boot.people[n][0]); renderOrder(); }
 function setPerson(n,b){ F.salesman=n; F.branch=b.branch; F.brand=b.brand; F.state=b.state; F.region=b.region; }
 function pickBranch(i){var b=S.boot.people[F.salesman][i];
   F.branch=b.branch;F.brand=b.brand;F.state=b.state;F.region=b.region;renderOrder()}
+/** SET 名字里有 BLACK / RED 就自动带出颜色 */
+function colorOfSet(st){
+  var t=String(st||'').toUpperCase();
+  if(t.indexOf('BLACK')>=0)return '黑色';
+  if(t.indexOf('RED')>=0)return '红色';
+  return '';
+}
 function applyTier(t){
   F.price=t.price; F.profit=t.profit; F.drvDesc=t.desc||'';
   // 价目表写了「普通雨伞 / 好的雨伞」就自动亮那一颗，省得每次点
@@ -548,7 +555,9 @@ function applyTier(t){
 }
 function pickSet(t){F.setType=t;var ts=S.boot.setTypes[t];
   if(ts&&ts.length===1){applyTier(ts[0])}else{F.price=0;F.profit=0;F.drvDesc='';F.drvGrade=''}
-  if(!F.drvColor&&LASTCOLOR)F.drvColor=LASTCOLOR;
+  var c=colorOfSet(t);
+  if(c)F.drvColor=c;                       // BLACK / RED UMBRELLA：名字就写明了
+  else if(!F.drvColor&&LASTCOLOR)F.drvColor=LASTCOLOR;
   renderOrder()}
 function pickPrice(i){applyTier(S.boot.setTypes[F.setType][i]);renderOrder()}
 
@@ -873,6 +882,10 @@ function openOrder(id){
        '<div><div class="lbl" style="letter-spacing:.14em">数量</div><input class="inp" id="eQ" inputmode="numeric" value="'+o.qty+'"></div>'+
        '<div><div class="lbl" style="letter-spacing:.14em">售价</div><input class="inp" id="eP" inputmode="decimal" value="'+o.price+'"></div>'+
      '</div>'+
+     '<div class="lbl" style="letter-spacing:.14em">总额（有折扣才改，留空就照数量×售价）</div>'+
+     '<input class="inp" id="eT" inputmode="decimal" placeholder="'+
+       (Math.round(o.qty*o.price*100)/100)+'" value="'+
+       (Math.abs(o.total-o.qty*o.price)>0.005?o.total:'')+'" style="margin-bottom:11px">'+
      '<div class="lbl">收款</div>'+
      (o.paid
        ?'<div class="card" style="padding:13px 15px;margin-bottom:11px;background:rgba(75,192,139,.09);border-color:rgba(75,192,139,.3)">'+
@@ -900,7 +913,8 @@ function ePick(b){document.querySelectorAll('#ePay .chip').forEach(function(c){c
 function saveOrder(id){
   call('updateOrder',[{id:id,qty:document.getElementById('eQ').value,price:document.getElementById('eP').value,
     note:document.getElementById('eN').value,
-    totalOverride:'',myIncomeOverride:'',driverFeeOverride:''}])
+    totalOverride:(document.getElementById('eT')||{}).value||'',
+    myIncomeOverride:'',driverFeeOverride:''}])
   .then(function(r){
     if(!r.ok){toast(r.msg,'bad');return}
     closeSheet();toast('已更新','ok');loadList();
@@ -1468,14 +1482,24 @@ function drawMerge(){
    '<div class="chips" id="mgL1">'+mgList('from')+'</div>'+
    '<div style="height:16px"></div>'+
    '<label class="lbl" style="color:var(--ok)">保留的（正式名称）</label>'+
-   '<input class="inp" placeholder="打字找…" value="'+esc(MG.q2)+'" oninput="MG.q2=this.value;refreshMerge()" style="margin-bottom:9px">'+
+   '<input class="inp" placeholder="打字找，或直接打新名字" value="'+esc(MG.q2)+'" oninput="MG.q2=this.value;refreshMerge()" style="margin-bottom:9px">'+
    '<div class="chips" id="mgL2">'+mgList('to')+'</div>'+
+   '<div id="mgNew" style="margin-top:6px">'+mgNewBtn()+'</div>'+
    '<div id="mgPv"></div>'+
    '<div style="height:12px"></div><button class="btn o" onclick="closeSheet()">取消</button>');
 }
+/** 打的名字名单里没有 → 让他直接用这个新名字（等于改名） */
+function mgNewBtn(){
+  var q=(MG.q2||'').trim();
+  if(q.length<3)return '';
+  var exists=(S.boot.branches||[]).some(function(b){return b.branch.toUpperCase()===q.toUpperCase()});
+  if(exists)return '';
+  return '<button class="chip" style="border-style:dashed" onclick="pickMerge(\'to\',\''+
+    esc(q).replace(/'/g,"\\'")+'\')">用新名字「'+esc(q)+'」（改名）</button>';
+}
 function refreshMerge(){
-  var a=document.getElementById('mgL1'),b=document.getElementById('mgL2');
-  if(a)a.innerHTML=mgList('from'); if(b)b.innerHTML=mgList('to');
+  var a=document.getElementById('mgL1'),b=document.getElementById('mgL2'),c=document.getElementById('mgNew');
+  if(a)a.innerHTML=mgList('from'); if(b)b.innerHTML=mgList('to'); if(c)c.innerHTML=mgNewBtn();
 }
 function pickMerge(which,name){
   if(which==='from')MG.from=name; else MG.to=name;
@@ -1489,7 +1513,7 @@ function pickMerge(which,name){
     pv.innerHTML='<div class="card" style="margin-top:16px;background:rgba(233,168,53,.10);border-color:rgba(233,168,53,.34)">'+
       '<label class="lbl" style="color:var(--warn)">按下去会发生什么</label>'+
       '<div class="sumrow"><span class="k">'+esc(r.from)+' 的订单</span><span class="v" style="font-size:16px">'+r.orders+' 笔</span></div>'+
-      '<div class="sumrow"><span class="k">全部改成</span><span class="v" style="font-size:15px;color:var(--ok)">'+esc(r.to)+'</span></div>'+
+      '<div class="sumrow"><span class="k">'+(r.rename?'改名成':'全部改成')+'</span><span class="v" style="font-size:15px;color:var(--ok)">'+esc(r.to)+'</span></div>'+
       (r.salesmen?'<div class="sumrow"><span class="k">销售员名单</span><span class="v" style="font-size:16px">'+r.salesmen+' 行一起搬</span></div>':'')+
       (Math.abs(r.feeDiff)>0.005
         ?'<div class="sumrow"><span class="k" style="color:var(--warn)">司机抽成合计</span>'+
@@ -1497,9 +1521,11 @@ function pickMerge(which,name){
          '<div class="hint" style="margin-top:9px;background:rgba(233,168,53,.09);border-color:rgba(233,168,53,.3)">'+
            '两边州属不同，抽成规则不一样，会重算。</div>'
         :'<div class="sumrow"><span class="k">司机抽成</span><span class="v" style="font-size:15px">不变</span></div>')+
-      '<div class="hint" style="margin-top:10px">「'+esc(r.from)+'」会从分行名单移除，这个动作不能自动复原。</div>'+
+      '<div class="hint" style="margin-top:10px">'+
+        (r.rename?'这是改名 —— 名单上那一行的名字会换掉。':'「'+esc(r.from)+'」会从分行名单移除。')+
+        '这个动作不能自动复原。</div>'+
       '<div style="height:14px"></div>'+
-      '<button class="btn p" onclick="doMerge()">确定合并</button>'+
+      '<button class="btn p" onclick="doMerge()">'+(r.rename?'确定改名':'确定合并')+'</button>'+
     '</div>';
   }).catch(function(e){toast(String(e.message||e),'bad')});
 }
@@ -1510,7 +1536,7 @@ function doMerge(){
   call('mergeBranch',[{from:MG.from,to:MG.to}]).then(function(r){
     if(!r.ok){toast(r.msg,'bad');closeSheet();return}
     closeSheet();
-    toast(r.orders+' 笔已并入 '+r.to,'ok');
+    toast(r.orders+(r.rename?' 笔已改名成 ':' 笔已并入 ')+r.to,'ok');
     S.boot=null;S.dash=null;S.orders=[];
     call('bootstrap',[]).then(function(b){S.boot=b;loadSettings()}).catch(function(){loadSettings()});
   }).catch(function(e){toast(String(e.message||e),'bad')});
