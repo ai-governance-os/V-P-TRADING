@@ -278,11 +278,23 @@ function migratePayment(adminPin) {
 
     var rng = sheet.getRange(first, 1, n, head.length);
     var v = rng.getValues();
-    var stat = { paid: 0, unpaid: 0, op: 0, pc: 0, dated: 0, noted: 0, skipped: 0, fixed: 0, noMethod: 0 };
+    var stat = { paid: 0, unpaid: 0, op: 0, pc: 0, dated: 0, noted: 0, skipped: 0, fixed: 0, noMethod: 0, backfilled: 0 };
 
     for (var i = 0; i < n; i++) {
       var s = String(v[i][cS] == null ? '' : v[i][cS]).trim().toUpperCase();
-      if (s === 'PAID' || s === 'UNPAID') { stat.skipped++; continue; }   // 已是新格式
+      if (s === 'PAID' || s === 'UNPAID') {
+        stat.skipped++;
+        // 旧版下单程式留下的：写了 PAID 却没有收款日期。用订单日期补上，
+        // 免得司机月结单与月报那一栏空白。补过就不会再补，重跑依然安全。
+        if (s === 'PAID' && !String(v[i][cD] == null ? '' : v[i][cD]).trim() && cO >= 0) {
+          var od0 = v[i][cO];
+          var iso0 = Object.prototype.toString.call(od0) === '[object Date]'
+            ? Utilities.formatDate(od0, TZ, 'yyyy-MM-dd')
+            : (String(od0 || '').match(/^\d{4}-\d{2}-\d{2}/) || [''])[0];
+          if (iso0) { v[i][cD] = iso0; stat.backfilled++; }
+        }
+        continue;
+      }
 
       var raw = String(v[i][cD] == null ? '' : v[i][cD]).trim();
       var src = cSrc >= 0 ? String(v[i][cSrc] == null ? '' : v[i][cSrc]) : '';
@@ -335,7 +347,8 @@ function migratePayment(adminPin) {
     return {
       ok: true, total: n, stat: stat,
       msg: '升级完成：共 ' + n + ' 笔｜已付 ' + stat.paid + '（OP ' + stat.op + ' · PC ' + stat.pc +
-           '）｜未付 ' + stat.unpaid + '（其中 ' + stat.fixed + ' 笔是修正回来的）｜已是新格式略过 ' + stat.skipped
+           '）｜未付 ' + stat.unpaid + '（其中 ' + stat.fixed + ' 笔是修正回来的）｜已是新格式略过 ' + stat.skipped +
+           (stat.backfilled ? '｜补上收款日期 ' + stat.backfilled + ' 笔' : '')
     };
   } catch (e) { return { ok: false, msg: friendlyErr_(e) }; } finally { try { lock.releaseLock(); } catch (e2) { } }
 }
@@ -471,13 +484,30 @@ function buildBoot_() {
 /* 客户在确认文件里自己写过的：同一个 SET 不同售价 = 不同货。
    SET_PRICE 分页的「说明」栏填了就盖过这里，这只是还没填之前的预设。 */
 var DESC_FALLBACK_ = {
-  '9 ITEMS|35': '普通雨伞',
-  '9 ITEMS|36': '普通雨伞',
-  '9 ITEMS|40': '好的雨伞',
   '10 ITEMS|50': '好的雨伞',
+  '9 ITEMS|35': '普通雨伞',
+  '8 ITEMS|55': '好的雨伞',
+  '9 ITEMS|40': '好的雨伞',
+  '9 ITEMS|38': '普通雨伞',
+  '10 ITEMS|55': '好的雨伞',
   'UMBRELLA|12': '普通雨伞',
+  'UMBRELLA|13': '普通雨伞',
+  '10 ITEMS|45': '普通雨伞',
   'UMBRELLA|20': '好的雨伞',
-  'UMBRELLA|26': '客制 logo 雨伞'
+  'UMBRELLA|26': '普通雨伞',
+  'UMBRELLA + BAG|16': '普通雨伞',
+  'UMBRELLA|14': '普通雨伞',
+  'UMBRELLA|25': '好的雨伞',
+  '9 ITEMS|36': '普通雨伞',
+  '8 ITEMS|26': '普通雨伞',
+  '9 ITEMS|12': '普通雨伞',
+  'BLACK UMBRELLA|14': '普通雨伞',
+  'RED UMBRELLA|12': '普通雨伞',
+  '8 ITEMS|60': '好的雨伞',
+  'PREMIUM UMBRELLA|20': '好的雨伞',
+  '8 ITEMS|50': '好的雨伞',
+  'UMBRELLA|11': '普通雨伞',
+  '10 ITEMS|40': '好的雨伞'
 };
 
 /* ---------- 计算：司机抽成 ---------- */
@@ -1177,12 +1207,98 @@ function changeBranch(p) {
    把全部订单、销售员名单都搬到正式名称，旧写法从 BRANCH 名单移除。
    抽成会重算 —— 万一两个写法的州属不一样。
 ------------------------------- */
+/* ───────── 分行改名护栏 ───────── */
+
+/** 统一写法：转大写、去头尾空白、中间多个空格并成一个、括号前後不留空 */
+function normBranchName_(x) {
+  return String(x == null ? '' : x)
+    .replace(/\u3000/g, ' ')          // 全形空格
+    .trim().toUpperCase()
+    .replace(/\s+/g, ' ')
+    .replace(/\s*\(\s*/g, '(').replace(/\s*\)\s*/g, ')')
+    .trim();
+}
+
+/** 两个字串差几个字（Levenshtein）。只用来抓打错字，不必快。 */
+function editDist_(a, b) {
+  a = String(a); b = String(b);
+  if (a === b) return 0;
+  var m = a.length, n = b.length;
+  if (!m) return n;
+  if (!n) return m;
+  var prev = [], cur = [], i, j;
+  for (j = 0; j <= n; j++) prev[j] = j;
+  for (i = 1; i <= m; i++) {
+    cur[0] = i;
+    for (j = 1; j <= n; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1,
+                        prev[j - 1] + (a.charAt(i - 1) === b.charAt(j - 1) ? 0 : 1));
+    }
+    for (j = 0; j <= n; j++) prev[j] = cur[j];
+  }
+  return prev[n];
+}
+
+/** 新名字跟现有分行像不像？像的话回传那几间，让人先看一眼再决定 */
+function similarBranches_(name, excludeName) {
+  var target = normBranchName_(name), ex = normBranchName_(excludeName);
+  if (target.length < 4) return [];
+  var out = [];
+  readTable_('BRANCH').rows.forEach(function (r) {
+    var b = normBranchName_(r.BRANCH);
+    if (!b || b === target || b === ex) return;
+    // 只差 1~2 个字，或差别只在空格 → 很可能是打错
+    var d = editDist_(target, b);
+    if (d <= 2 || target.replace(/\s/g, '') === b.replace(/\s/g, '')) {
+      out.push({ branch: r.BRANCH, dist: d, n: toNum_(r['历史笔数']) });
+    }
+  });
+  return out.sort(function (a, b) { return a.dist - b.dist; }).slice(0, 3);
+}
+
+/** 改名 / 合并的纪录，出事查得到也改得回 */
+function logBranchChange_(rec) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sh = ss.getSheetByName('BRANCH_LOG');
+    var head = ['时间', '动作', '从', '到', '订单笔数', '销售员笔数', '抽成变动', '操作人'];
+    if (!sh) {
+      sh = ss.insertSheet('BRANCH_LOG');
+      sh.getRange(1, 1, 1, head.length)
+        .setValues([['● 分行改名 / 合并纪录（只进不出，可用来还原）', '', '', '', '', '', '', '']]);
+      sh.getRange(2, 1, 1, head.length).setValues([head]).setFontWeight('bold');
+      sh.setFrozenRows(2);
+    }
+    sh.appendRow([
+      Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd HH:mm'),
+      rec.action, rec.from, rec.to,
+      rec.orders, rec.salesmen, rec.feeDiff, rec.by || ''
+    ]);
+  } catch (e) { /* 纪录写不进去也不该挡住主流程 */ }
+}
+
 function previewMergeBranch(p) {
-  var from = String((p && p.from) || '').trim(), to = String((p && p.to) || '').trim();
+  // 先统一写法：大写、去掉多余空格。「PERODUA  SEREMBAN 2」和「perodua seremban 2」
+  // 在这里就变成同一个字串，不会因为多打一个空格生出第二间分行。
+  var from = normBranchName_(p && p.from), to = normBranchName_(p && p.to);
   if (!from || !to) return { ok: false, msg: '请选两间分行' };
-  if (up_(from) === up_(to)) return { ok: false, msg: '两个是同一个名字' };
-  var toInfo = branchInfo_(to);
-  if (!toInfo) return { ok: false, msg: '名单里没有：' + to };
+  if (from === to) return { ok: false, msg: '两个是同一个名字' };
+  if (to.length < 3) return { ok: false, msg: '名字太短，请打完整的分行名' };
+
+  var toInfo = branchInfo_(to), fromInfo = branchInfo_(from), rename = false, near = [];
+  if (!toInfo) {
+    // 新名字不在名单里 → 当作「改名」，州属沿用旧的，品牌照新名字重算
+    if (!fromInfo) return { ok: false, msg: '名单里没有：' + from + '，也没有：' + to };
+    var nb = brandOf_(to);
+    toInfo = {
+      branch: to,
+      brand: (nb && nb !== 'OTHER') ? nb : fromInfo.brand,
+      state: fromInfo.state, region: fromInfo.region
+    };
+    rename = true;
+    // 打错字防护：新名字跟现有某间很像但不一样，先问一句
+    near = similarBranches_(to, from);
+  }
 
   var t = readTable_('ORDERS');
   var n = 0, feeDiff = 0;
@@ -1196,9 +1312,12 @@ function previewMergeBranch(p) {
   if (!n && !sm && !branchInfo_(from))
     return { ok: false, msg: '名单里没有「' + from + '」，也没有任何订单用这个写法' };
   return {
-    ok: true, from: from, to: toInfo.branch, orders: n, salesmen: sm,
+    ok: true, from: from, to: toInfo.branch, orders: n, salesmen: sm, rename: rename,
     feeDiff: Math.round(feeDiff * 100) / 100,
-    fromInfo: branchInfo_(from), toInfo: toInfo
+    fromInfo: fromInfo, toInfo: toInfo,
+    near: near,
+    brandChanged: !!(fromInfo && toInfo.brand && up_(fromInfo.brand) !== up_(toInfo.brand)),
+    brandFrom: fromInfo ? fromInfo.brand : '', brandTo: toInfo.brand
   };
 }
 
@@ -1241,19 +1360,29 @@ function mergeBranch(p) {
     });
     kill.sort(function (a, b) { return b - a; }).forEach(function (row) { st.sheet.deleteRow(row); });
 
-    // BRANCH 名单：把旧写法那一行删掉
+    // BRANCH 名单：改名就改字，合并就把旧的删掉
     var bt = readTable_('BRANCH');
-    var drop = bt.rows.filter(function (r) { return up_(r.BRANCH) === up_(from); })
-      .map(function (r) { return r.__row; }).sort(function (a, b) { return b - a; });
-    drop.forEach(function (row) { bt.sheet.deleteRow(row); });
+    var mine2 = bt.rows.filter(function (r) { return up_(r.BRANCH) === up_(from); });
+    if (pv.rename) {
+      var bc = bt.head.indexOf('BRANCH') + 1;
+      if (bc > 0) mine2.forEach(function (r) { bt.sheet.getRange(r.__row, bc).setValue(toInfo.branch); });
+    } else {
+      mine2.map(function (r) { return r.__row; })
+        .sort(function (a, b) { return b - a; })
+        .forEach(function (row) { bt.sheet.deleteRow(row); });
+    }
 
     return { ok: true };
   });
   if (!res.ok) return res;
 
   clearBootCache_();
+  logBranchChange_({
+    action: pv.rename ? '改名' : '合并', from: from, to: toInfo.branch,
+    orders: hits.length, salesmen: pv.salesmen, feeDiff: pv.feeDiff, by: (p && p.by) || ''
+  });
   return { ok: true, from: from, to: toInfo.branch, orders: hits.length,
-           salesmen: pv.salesmen, feeDiff: pv.feeDiff };
+           salesmen: pv.salesmen, feeDiff: pv.feeDiff, rename: pv.rename };
 }
 
 /** 把销售员的「主要分行」★ 移到新分行；名单里没有就补一行 */
@@ -1326,6 +1455,118 @@ function addSetPrice(p) {
     clearBootCache_();
     return { ok: true };
   } catch (e) { return { ok: false, msg: String(e.message || e) }; }
+}
+
+/*******************************************************
+ * 一次性维护脚本 —— 2026-07-29
+ * 客户第二轮回覆确认後的资料整理。
+ * 走的是跟 App 按钮完全一样的函式，差别只在：
+ * 每一步先算预期值，对不上就立刻中止，绝不硬做。
+ * 跑完可以整个档案删掉。
+ *******************************************************/
+
+function RUN_MAINT_20260729() {
+  var log = [], abort = null;
+  function say(s) { log.push(s); }
+
+  function snapshot() {
+    var t = readTable_('ORDERS'), inc = 0, fee = 0, mine = 0, n = 0;
+    t.rows.forEach(function (r) {
+      if (isVoid_(r)) return;
+      n++; inc += toNum_(r.TOTAL_INCOME); fee += toNum_(r.DRIVER_FEE); mine += toNum_(r.MY_INCOME);
+    });
+    return { n: n, inc: Math.round(inc * 100) / 100,
+             fee: Math.round(fee * 100) / 100, mine: Math.round(mine * 100) / 100 };
+  }
+
+  var before = snapshot();
+  say('【开始前】订单 ' + before.n + ' 笔｜营业额 RM ' + before.inc +
+      '｜利润 RM ' + before.mine + '｜司机抽成 RM ' + before.fee);
+
+  /* ── 步骤 1：升级付款资料（补收款日期） ── */
+  var m = migratePayment();
+  if (!m.ok) { abort = '步骤1 升级失败：' + m.msg; }
+  else say('[1] 升级付款资料 → ' + m.msg);
+
+  /* ── 步骤 2：VP00401 改去 EMAS PERLING ── */
+  if (!abort) {
+    var pv = previewBranch({ id: 'VP00401', branch: 'EMAS PERLING' });
+    if (!pv.ok) abort = '步骤2 预览失败：' + pv.msg;
+    else if (up_(pv.from.branch) === 'EMAS PERLING') { say('[2] VP00401 已经是 EMAS PERLING，跳过'); pv = null; }
+    else if (up_(pv.from.branch) !== 'EMAS') abort = '步骤2 中止：VP00401 现在的分行是「' + pv.from.branch + '」，既不是 EMAS 也不是 EMAS PERLING，资料跟预期不符';
+    else if (pv && Math.abs(pv.diff) > 0.005) abort = '步骤2 中止：抽成会变动 RM ' + pv.diff + '，预期应为 0';
+    else if (pv) {
+      var cb = changeBranch({ id: 'VP00401', branch: 'EMAS PERLING', alsoSalesman: true });
+      if (!cb.ok) abort = '步骤2 执行失败：' + cb.msg;
+      else say('[2] VP00401 ' + pv.from.branch + ' → EMAS PERLING｜抽成 ' + cb.oldFee +
+               ' → ' + cb.newFee + '（不变）｜销售员 ' + cb.salesman +
+               (cb.salesmanMoved ? ' 名单已跟着搬' : ' 名单未动'));
+    }
+  }
+
+  /* ── 步骤 3：七组合并 / 改名 ── */
+  // [从, 到, 预期笔数, 是不是改名]
+  // EMAS → EMAS PUTRAJAYA 不在这里：底下还有两笔柔佛单归属未定，
+  // 合并会把柔佛营业额算进雪兰莪，也会给司机他没送过的抽成。留给客户自己处理。
+  var PLAN = [
+    ['PROTON TAMAN MIDAS',      'PROTON TAMAN MIDAH', 1, true],
+    ['PROTON MIDAH',            'PROTON TAMAN MIDAH', 2, false],
+    ['PERODUA NILAI IMPIAN',    'PERODUA NILAI',      7, false],
+    ['JAECOO SEREMBAN',         'JAECOO SEREMBAN 2',  2, false],
+    ['PROTON IOI PUTRAJAYA',    'PROTON PUTRAJAYA',   1, false],
+    ['PROTON PUTRAJAYA - EMAS', 'EMAS PUTRAJAYA',     1, false]
+  ];
+
+  for (var i = 0; i < PLAN.length && !abort; i++) {
+    var from = PLAN[i][0], to = PLAN[i][1], expN = PLAN[i][2], expRename = PLAN[i][3];
+    var tag = '[3.' + (i + 1) + '] ' + from + ' → ' + to;
+
+    var p = previewMergeBranch({ from: from, to: to });
+    if (!p.ok) { abort = tag + ' 预览失败：' + p.msg; break; }
+    if (p.orders !== expN) { abort = tag + ' 中止：预期 ' + expN + ' 笔，实际 ' + p.orders + ' 笔'; break; }
+    if (Math.abs(p.feeDiff) > 0.005) { abort = tag + ' 中止：司机抽成会变动 RM ' + p.feeDiff + '，预期应为 0'; break; }
+    if (!!p.rename !== expRename) { abort = tag + ' 中止：预期' + (expRename ? '改名' : '合并') + '，实际是' + (p.rename ? '改名' : '合并'); break; }
+
+    var r = mergeBranch({ from: from, to: to, by: 'MAINT-20260729' });
+    if (!r.ok) { abort = tag + ' 执行失败：' + r.msg; break; }
+    say(tag + '｜' + (r.rename ? '改名' : '合并') + ' ' + r.orders + ' 笔｜销售员 ' +
+        r.salesmen + ' 行｜抽成变动 RM ' + r.feeDiff);
+  }
+
+  /* ── 收尾对帐 ── */
+  var after = snapshot();
+  say('【结束後】订单 ' + after.n + ' 笔｜营业额 RM ' + after.inc +
+      '｜利润 RM ' + after.mine + '｜司机抽成 RM ' + after.fee);
+
+  var same = (before.n === after.n) &&
+             Math.abs(before.inc - after.inc) < 0.005 &&
+             Math.abs(before.mine - after.mine) < 0.005 &&
+             Math.abs(before.fee - after.fee) < 0.005;
+  say(same ? '✓ 对帐通过：笔数、营业额、利润、司机抽成四项完全没变'
+           : '✗ 对帐不符！差额 → 笔数 ' + (after.n - before.n) +
+             '｜营业额 ' + Math.round((after.inc - before.inc) * 100) / 100 +
+             '｜利润 ' + Math.round((after.mine - before.mine) * 100) / 100 +
+             '｜抽成 ' + Math.round((after.fee - before.fee) * 100) / 100);
+
+  if (abort) say('■ 已中止：' + abort + '（中止之前的步骤已经生效，之後的都没做）');
+
+  // 留给客户手动处理的部分，列出来
+  var left = readTable_('ORDERS').rows.filter(function (r) {
+    return up_(r.BRANCH) === 'EMAS' && !isVoid_(r);
+  });
+  if (left.length) {
+    say('── 以下留给客户自己处理（没有动） ──');
+    left.forEach(function (r) {
+      say('　' + r.ORDER_ID + '｜' + r.DATE + '｜' + r.STATE + '/' + r.REGION + '｜' +
+          r.SALESMAN + '｜' + r.SET_TYPE + ' ' + r.QTY + '×' + r.UNIT_PRICE +
+          '｜RM ' + r.TOTAL_INCOME);
+    });
+    say('　→ 柔佛那几笔要先各自归到正确分行，「EMAS」才可以并去 EMAS PUTRAJAYA。');
+  }
+
+  var out = log.join('\n');
+  Logger.log(out);
+  return out;
 }
 
 /*******************************************************
@@ -1574,13 +1815,30 @@ function buildSalesman_(rows) {
 /* ---------- 写表 ---------- */
 /* 客户自己讲过的：同一个 SET 不同售价 = 不同货。这句会印给司机看。 */
 var SET_DESC_ = {
-  '9 ITEMS|35': '普通雨伞',
-  '9 ITEMS|36': '普通雨伞',
-  '9 ITEMS|40': '好的雨伞',
   '10 ITEMS|50': '好的雨伞',
+  '9 ITEMS|35': '普通雨伞',
+  '8 ITEMS|55': '好的雨伞',
+  '9 ITEMS|40': '好的雨伞',
+  '9 ITEMS|38': '普通雨伞',
+  '10 ITEMS|55': '好的雨伞',
   'UMBRELLA|12': '普通雨伞',
+  'UMBRELLA|13': '普通雨伞',
+  '10 ITEMS|45': '普通雨伞',
   'UMBRELLA|20': '好的雨伞',
-  'UMBRELLA|26': '客制 logo 雨伞'
+  'UMBRELLA|26': '普通雨伞',
+  'UMBRELLA + BAG|16': '普通雨伞',
+  'UMBRELLA|14': '普通雨伞',
+  'UMBRELLA|25': '好的雨伞',
+  '9 ITEMS|36': '普通雨伞',
+  '8 ITEMS|26': '普通雨伞',
+  '9 ITEMS|12': '普通雨伞',
+  'BLACK UMBRELLA|14': '普通雨伞',
+  'RED UMBRELLA|12': '普通雨伞',
+  '8 ITEMS|60': '好的雨伞',
+  'PREMIUM UMBRELLA|20': '好的雨伞',
+  '8 ITEMS|50': '好的雨伞',
+  'UMBRELLA|11': '普通雨伞',
+  '10 ITEMS|40': '好的雨伞'
 };
 
 var ORDER_HEAD = ['ORDER_ID', 'DATE', 'MONTH', 'REGION', 'STATE', 'BRANCH', 'BRAND', 'SALESMAN',
