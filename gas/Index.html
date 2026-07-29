@@ -1521,19 +1521,44 @@ function pickMerge(which,name){
          '<div class="hint" style="margin-top:9px;background:rgba(233,168,53,.09);border-color:rgba(233,168,53,.3)">'+
            '两边州属不同，抽成规则不一样，会重算。</div>'
         :'<div class="sumrow"><span class="k">司机抽成</span><span class="v" style="font-size:15px">不变</span></div>')+
+      (r.brandChanged
+        ?'<div class="sumrow"><span class="k">品牌栏</span><span class="v" style="font-size:15px">'+
+           esc(r.brandFrom)+' → '+esc(r.brandTo)+'</span></div>':'')+
+      ((r.near&&r.near.length)
+        ?'<div class="hint" style="margin-top:10px;background:rgba(233,168,53,.13);border-color:rgba(233,168,53,.45);color:var(--warn)">'+
+           '⚠ 名单里已经有很像的：'+r.near.map(function(x){
+             return '<b>'+esc(x.branch)+'</b>'+(x.n?'（'+x.n+' 笔）':'')}).join('、')+
+           '<br>是不是要选这一间？打错字会多生一间分行出来。</div>':'')+
       '<div class="hint" style="margin-top:10px">'+
-        (r.rename?'这是改名 —— 名单上那一行的名字会换掉。':'「'+esc(r.from)+'」会从分行名单移除。')+
-        '这个动作不能自动复原。</div>'+
+        (r.rename?'这是改名 —— 名单上那一行的名字会换掉，打错了再改回来就好。'
+                 :'「'+esc(r.from)+'」会从分行名单移除。<b>合并之后没办法再拆开</b>，因为分不出哪笔本来是哪间。')+
+        '</div>'+
       '<div style="height:14px"></div>'+
-      '<button class="btn p" onclick="doMerge()">'+(r.rename?'确定改名':'确定合并')+'</button>'+
+      (r.rename
+        ?'<button class="btn p" onclick="doMerge()">确定改名</button>'
+        :'<label class="lbl" style="color:var(--warn)">确认无误的话，把要并掉的名字打一次</label>'+
+         '<input class="inp" id="mgCfm" placeholder="'+esc(r.from)+'" oninput="mgCheck()" style="margin-bottom:10px">'+
+         '<button class="btn p" id="mgGo" disabled style="opacity:.4" onclick="doMerge()">确定合并</button>')+
     '</div>';
   }).catch(function(e){toast(String(e.message||e),'bad')});
 }
+/** 合并要打字确认 —— 不可复原的动作多一道手续 */
+function mgCheck(){
+  var i=document.getElementById('mgCfm'),b=document.getElementById('mgGo');
+  if(!i||!b)return;
+  var okk=mgNorm(i.value)===mgNorm(MG.from);
+  b.disabled=!okk; b.style.opacity=okk?'1':'.4';
+}
+function mgNorm(x){return String(x||'').replace(/\u3000/g,' ').trim().toUpperCase().replace(/\s+/g,' ')}
 function doMerge(){
   if(!MG.from||!MG.to){toast('两间都要选','bad');return}
+  if(MG.pv&&!MG.pv.rename){
+    var i=document.getElementById('mgCfm');
+    if(!i||mgNorm(i.value)!==mgNorm(MG.from)){toast('请把要并掉的名字打一次','bad');return}
+  }
   openSheet('<div class="load"><div class="spin"></div></div>'+
     '<div style="text-align:center;color:var(--dim);font-size:14px">合并中…</div>');
-  call('mergeBranch',[{from:MG.from,to:MG.to}]).then(function(r){
+  call('mergeBranch',[{from:MG.from,to:MG.to,by:(S.user||{}).name||''}]).then(function(r){
     if(!r.ok){toast(r.msg,'bad');closeSheet();return}
     closeSheet();
     toast(r.orders+(r.rename?' 笔已改名成 ':' 笔已并入 ')+r.to,'ok');
