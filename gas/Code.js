@@ -1172,6 +1172,90 @@ function changeBranch(p) {
   };
 }
 
+/* ---------- 合并分行 ----------
+   同一间店有两种写法（PERODUA NILAI / PERODUA NILAI IMPIAN）时，
+   把全部订单、销售员名单都搬到正式名称，旧写法从 BRANCH 名单移除。
+   抽成会重算 —— 万一两个写法的州属不一样。
+------------------------------- */
+function previewMergeBranch(p) {
+  var from = String((p && p.from) || '').trim(), to = String((p && p.to) || '').trim();
+  if (!from || !to) return { ok: false, msg: '请选两间分行' };
+  if (up_(from) === up_(to)) return { ok: false, msg: '两个是同一个名字' };
+  var toInfo = branchInfo_(to);
+  if (!toInfo) return { ok: false, msg: '名单里没有：' + to };
+
+  var t = readTable_('ORDERS');
+  var n = 0, feeDiff = 0;
+  t.rows.forEach(function (r) {
+    if (up_(r.BRANCH) !== up_(from) || isVoid_(r)) return;
+    n++;
+    var nf = calcDriverFee_(toInfo.region, toInfo.state, String(r.SET_TYPE), toNum_(r.QTY), toNum_(r.UNIT_PRICE));
+    feeDiff += nf - toNum_(r.DRIVER_FEE);
+  });
+  var sm = readTable_('SALESMAN').rows.filter(function (r) { return up_(r.BRANCH) === up_(from); }).length;
+  if (!n && !sm && !branchInfo_(from))
+    return { ok: false, msg: '名单里没有「' + from + '」，也没有任何订单用这个写法' };
+  return {
+    ok: true, from: from, to: toInfo.branch, orders: n, salesmen: sm,
+    feeDiff: Math.round(feeDiff * 100) / 100,
+    fromInfo: branchInfo_(from), toInfo: toInfo
+  };
+}
+
+function mergeBranch(p) {
+  var pv = previewMergeBranch(p);
+  if (!pv.ok) return pv;
+  var from = pv.from, toInfo = pv.toInfo;
+
+  var t = readTable_('ORDERS');
+  var cB = t.head.indexOf('BRANCH'), cBr = t.head.indexOf('BRAND'),
+      cS = t.head.indexOf('STATE'), cR = t.head.indexOf('REGION'),
+      cF = t.head.indexOf('DRIVER_FEE');
+  var hits = t.rows.filter(function (r) { return up_(r.BRANCH) === up_(from); });
+
+  var res = withLock_(function () {
+    hits.forEach(function (r) {
+      var rng = t.sheet.getRange(r.__row, 1, 1, t.head.length);
+      var v = rng.getValues()[0];
+      if (cB >= 0) v[cB] = toInfo.branch;
+      if (cBr >= 0 && toInfo.brand) v[cBr] = toInfo.brand;
+      if (cS >= 0) v[cS] = toInfo.state;
+      if (cR >= 0) v[cR] = toInfo.region;
+      if (cF >= 0 && !isVoid_(r))
+        v[cF] = calcDriverFee_(toInfo.region, toInfo.state, String(r.SET_TYPE), toNum_(r.QTY), toNum_(r.UNIT_PRICE));
+      rng.setValues([v]);
+    });
+
+    // 销售员名单：旧写法改成新的；同一人已经有新分行那一行就把旧的清空
+    var st = readTable_('SALESMAN');
+    var sB = st.head.indexOf('BRANCH') + 1;
+    var have = {};
+    st.rows.forEach(function (r) {
+      if (up_(r.BRANCH) === up_(toInfo.branch)) have[up_(r.SALESMAN)] = 1;
+    });
+    var kill = [];
+    st.rows.forEach(function (r) {
+      if (up_(r.BRANCH) !== up_(from)) return;
+      if (have[up_(r.SALESMAN)]) kill.push(r.__row);
+      else if (sB > 0) st.sheet.getRange(r.__row, sB).setValue(toInfo.branch);
+    });
+    kill.sort(function (a, b) { return b - a; }).forEach(function (row) { st.sheet.deleteRow(row); });
+
+    // BRANCH 名单：把旧写法那一行删掉
+    var bt = readTable_('BRANCH');
+    var drop = bt.rows.filter(function (r) { return up_(r.BRANCH) === up_(from); })
+      .map(function (r) { return r.__row; }).sort(function (a, b) { return b - a; });
+    drop.forEach(function (row) { bt.sheet.deleteRow(row); });
+
+    return { ok: true };
+  });
+  if (!res.ok) return res;
+
+  clearBootCache_();
+  return { ok: true, from: from, to: toInfo.branch, orders: hits.length,
+           salesmen: pv.salesmen, feeDiff: pv.feeDiff };
+}
+
 /** 把销售员的「主要分行」★ 移到新分行；名单里没有就补一行 */
 function moveSalesman_(salesman, to) {
   try {

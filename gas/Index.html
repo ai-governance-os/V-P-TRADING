@@ -436,7 +436,7 @@ function renderOrder(){
    '<div class="chips">'+types.map(function(t){
      return '<button class="chip'+(F.setType===t?' on':'')+'" onclick="pickSet(\''+esc(t).replace(/'/g,"\\'")+'\')">'+esc(t)+'</button>'}).join('')+
    '</div>'+
-   (tiers.length?('<div style="margin-top:15px"><label class="lbl">售价 / set</label><div class="chips">'+
+   (tiers.length?('<div style="margin-top:15px"><label class="lbl">售价 / '+unitOf(F.setType)+'</label><div class="chips">'+
      tiers.map(function(t,i){return '<button class="chip'+(F.price===t.price?' on':'')+'" onclick="pickPrice('+i+')">RM '+t.price+
        '<small>赚 RM'+t.profit+'</small></button>'}).join('')+'</div></div>'):'')+
   '</div>'+
@@ -716,7 +716,7 @@ function paintList(rows){
     return '<div class="oi" onclick="openOrder(\''+o.id+'\')"><div class="r1"><div><div class="b">'+esc(o.salesman)+'</div>'+
       '<div class="s">'+esc(o.branch)+' · '+esc(o.date)+'</div></div>'+
       '<div class="amt">RM '+rm(o.total)+'</div></div>'+
-      '<div class="r2"><span class="tag set">'+esc(o.setType)+' × '+o.qty+'</span>'+
+      '<div class="r2"><span class="tag set">'+esc(o.setType)+' × '+o.qty+' '+unitOf(o.setType)+'</span>'+
       (o.paid?(o.method?'<span class="tag paid">已收 '+esc(o.method)+'</span>'
                        :'<span class="tag paid">已收</span><span class="tag pend">方式没填</span>')
              :'<span class="tag pend">未收钱</span>')+
@@ -855,7 +855,7 @@ function openOrder(id){
   openSheet('<div style="font-family:var(--sf);font-size:25px;margin-bottom:3px">'+esc(o.salesman)+'</div>'+
    '<div class="h1s" style="margin-bottom:18px">'+esc(o.branch)+' · '+esc(o.date)+' · '+esc(o.id)+'</div>'+
    '<div class="card"><div class="sumrow"><span class="k">'+esc(o.setType)+'</span>'+
-     '<span class="v" style="font-size:15px">RM '+o.price+' / set</span></div>'+
+     '<span class="v" style="font-size:15px">RM '+o.price+' / '+unitOf(o.setType)+'</span></div>'+
    '<div class="sumrow"><span class="k">总额</span><span class="v"><span class="cur">RM</span>'+rm(o.total)+'</span></div>'+
    (admin?'<div class="sumrow"><span class="k">我的利润</span><span class="v" style="color:var(--ok)"><span class="cur">RM</span>'+rm(o.mine)+'</span></div>'+
      '<div class="sumrow"><span class="k">司机抽成</span><span class="v" style="color:var(--warn)"><span class="cur">RM</span>'+rm(o.fee)+'</span></div>':'')+
@@ -1336,7 +1336,7 @@ function renderDriver(){
       return '<div class="oi'+(S.sel[o.id]?' sel':'')+'" onclick="tog(\''+o.id+'\')">'+
         '<div class="r1"><div><div class="b">'+esc(o.branch)+'</div>'+
         '<div class="s">'+esc(o.salesman)+' · '+esc(o.date)+'</div></div>'+
-        '<div class="amt">'+o.qty+' set</div></div>'+
+        '<div class="amt">'+o.qty+' '+unitOf(o.setType)+'</div></div>'+
         '<div class="r2"><span class="tag set">'+esc(o.setType)+'</span>'+
         (admin?'<span class="tag dlv">抽成 RM'+rm(o.fee)+'</span>':'')+'</div></div>'}).join('')+
     '<div style="height:10px"></div>'+
@@ -1432,6 +1432,13 @@ function renderSettings(){
      'PIN 一定要 4 位数字，而且不能跟别人重复。改完立刻生效，下次登入用新的。</div>'+
    '<div class="h1s" style="margin-top:26px">资料维护</div>'+
    '<div class="card">'+
+     '<div style="font-size:14.5px;font-weight:600;margin-bottom:7px">合并分行</div>'+
+     '<div style="color:var(--dim);font-size:13px;line-height:1.65;margin-bottom:14px">'+
+       '同一间店有两种写法时（例如 PERODUA NILAI 和 PERODUA NILAI IMPIAN），'+
+       '把旧的全部并到正式名称。<br>订单、销售员名单一起搬，抽成会重算。</div>'+
+     '<button class="btn o" onclick="askMerge()">合并两间分行</button>'+
+   '</div>'+
+   '<div class="card">'+
      '<div style="font-size:14.5px;font-weight:600;margin-bottom:7px">升级付款资料</div>'+
      '<div style="color:var(--dim);font-size:13px;line-height:1.65;margin-bottom:14px">'+
        '把旧的 OP / PC 写法转成新格式（已收钱 + 收款方式 + 日期 + 备注）。<br>'+
@@ -1439,6 +1446,76 @@ function renderSettings(){
      '<button class="btn o" onclick="runMigrate()">开始升级</button>'+
    '</div>';
 }
+/* --- 合并分行 --- */
+var MG={from:'',to:'',q1:'',q2:'',pv:null};
+function askMerge(){ MG={from:'',to:'',q1:'',q2:'',pv:null}; drawMerge() }
+function mgList(which){
+  var q=(which==='from'?MG.q1:MG.q2), sel=(which==='from'?MG.from:MG.to);
+  var list=(S.boot.branches||[]).filter(function(b){
+    if(which==='to'&&MG.from&&b.branch===MG.from)return false;
+    if(which==='from'&&MG.to&&b.branch===MG.to)return false;
+    return !q||b.branch.toUpperCase().indexOf(q.toUpperCase())>=0}).slice(0,8);
+  return list.map(function(b){
+    return '<button class="chip'+(sel===b.branch?' on':'')+'" style="margin:0 6px 6px 0" '+
+      'onclick="pickMerge(\''+which+'\',\''+esc(b.branch).replace(/'/g,"\\'")+'\')">'+esc(b.branch)+'</button>'}).join('')
+    || '<div style="font-size:13px;color:var(--dim2)">找不到</div>';
+}
+function drawMerge(){
+  openSheet('<div style="font-family:var(--sf);font-size:25px;margin-bottom:3px">合并分行</div>'+
+   '<div class="h1s" style="margin-bottom:18px">把旧写法并到正式名称</div>'+
+   '<label class="lbl" style="color:var(--bad)">要并掉的（旧写法）</label>'+
+   '<input class="inp" placeholder="打字找…" value="'+esc(MG.q1)+'" oninput="MG.q1=this.value;refreshMerge()" style="margin-bottom:9px">'+
+   '<div class="chips" id="mgL1">'+mgList('from')+'</div>'+
+   '<div style="height:16px"></div>'+
+   '<label class="lbl" style="color:var(--ok)">保留的（正式名称）</label>'+
+   '<input class="inp" placeholder="打字找…" value="'+esc(MG.q2)+'" oninput="MG.q2=this.value;refreshMerge()" style="margin-bottom:9px">'+
+   '<div class="chips" id="mgL2">'+mgList('to')+'</div>'+
+   '<div id="mgPv"></div>'+
+   '<div style="height:12px"></div><button class="btn o" onclick="closeSheet()">取消</button>');
+}
+function refreshMerge(){
+  var a=document.getElementById('mgL1'),b=document.getElementById('mgL2');
+  if(a)a.innerHTML=mgList('from'); if(b)b.innerHTML=mgList('to');
+}
+function pickMerge(which,name){
+  if(which==='from')MG.from=name; else MG.to=name;
+  refreshMerge();
+  var pv=document.getElementById('mgPv');
+  if(!MG.from||!MG.to){if(pv)pv.innerHTML='';return}
+  pv.innerHTML='<div class="load"><div class="spin"></div></div>';
+  call('previewMergeBranch',[{from:MG.from,to:MG.to}]).then(function(r){
+    if(!r.ok){toast(r.msg,'bad');pv.innerHTML='';return}
+    MG.pv=r;
+    pv.innerHTML='<div class="card" style="margin-top:16px;background:rgba(233,168,53,.10);border-color:rgba(233,168,53,.34)">'+
+      '<label class="lbl" style="color:var(--warn)">按下去会发生什么</label>'+
+      '<div class="sumrow"><span class="k">'+esc(r.from)+' 的订单</span><span class="v" style="font-size:16px">'+r.orders+' 笔</span></div>'+
+      '<div class="sumrow"><span class="k">全部改成</span><span class="v" style="font-size:15px;color:var(--ok)">'+esc(r.to)+'</span></div>'+
+      (r.salesmen?'<div class="sumrow"><span class="k">销售员名单</span><span class="v" style="font-size:16px">'+r.salesmen+' 行一起搬</span></div>':'')+
+      (Math.abs(r.feeDiff)>0.005
+        ?'<div class="sumrow"><span class="k" style="color:var(--warn)">司机抽成合计</span>'+
+           '<span class="v" style="color:var(--warn)">'+(r.feeDiff>0?'+':'')+'RM '+rm(r.feeDiff)+'</span></div>'+
+         '<div class="hint" style="margin-top:9px;background:rgba(233,168,53,.09);border-color:rgba(233,168,53,.3)">'+
+           '两边州属不同，抽成规则不一样，会重算。</div>'
+        :'<div class="sumrow"><span class="k">司机抽成</span><span class="v" style="font-size:15px">不变</span></div>')+
+      '<div class="hint" style="margin-top:10px">「'+esc(r.from)+'」会从分行名单移除，这个动作不能自动复原。</div>'+
+      '<div style="height:14px"></div>'+
+      '<button class="btn p" onclick="doMerge()">确定合并</button>'+
+    '</div>';
+  }).catch(function(e){toast(String(e.message||e),'bad')});
+}
+function doMerge(){
+  if(!MG.from||!MG.to){toast('两间都要选','bad');return}
+  openSheet('<div class="load"><div class="spin"></div></div>'+
+    '<div style="text-align:center;color:var(--dim);font-size:14px">合并中…</div>');
+  call('mergeBranch',[{from:MG.from,to:MG.to}]).then(function(r){
+    if(!r.ok){toast(r.msg,'bad');closeSheet();return}
+    closeSheet();
+    toast(r.orders+' 笔已并入 '+r.to,'ok');
+    S.boot=null;S.dash=null;S.orders=[];
+    call('bootstrap',[]).then(function(b){S.boot=b;loadSettings()}).catch(function(){loadSettings()});
+  }).catch(function(e){toast(String(e.message||e),'bad')});
+}
+
 function runMigrate(){
   openSheet('<div style="font-family:var(--sf);font-size:25px;margin-bottom:3px">升级付款资料</div>'+
    '<div class="h1s" style="margin-bottom:18px">跑一次就好</div>'+
