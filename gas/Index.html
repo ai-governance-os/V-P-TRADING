@@ -1455,6 +1455,20 @@ function renderSettings(){
      '<button class="btn o" onclick="askMerge()">合并两间分行</button>'+
    '</div>'+
    '<div class="card">'+
+     '<div style="font-size:14.5px;font-weight:600;margin-bottom:7px">改销售员名字</div>'+
+     '<div style="color:var(--dim);font-size:13px;line-height:1.65;margin-bottom:14px">'+
+       '名字打错、或同一个人有两种写法时用这个。<br>'+
+       '所有旧订单会一起改过来，金额与抽成完全不动。改错了再改回来就好。</div>'+
+     '<button class="btn o" onclick="askRen()">改名字</button>'+
+   '</div>'+
+   '<div class="card">'+
+     '<div style="font-size:14.5px;font-weight:600;margin-bottom:7px">价目表</div>'+
+     '<div style="color:var(--dim);font-size:13px;line-height:1.65;margin-bottom:14px">'+
+       '新增售价、改每 set 利润、填给司机看的中文说明。<br>'+
+       '不用的价钱按「停用」就会从下单页消失，历史订单不受影响，随时可以恢复。</div>'+
+     '<button class="btn o" onclick="askPrice()">管理价目表</button>'+
+   '</div>'+
+   '<div class="card">'+
      '<div style="font-size:14.5px;font-weight:600;margin-bottom:7px">升级付款资料</div>'+
      '<div style="color:var(--dim);font-size:13px;line-height:1.65;margin-bottom:14px">'+
        '把旧的 OP / PC 写法转成新格式（已收钱 + 收款方式 + 日期 + 备注）。<br>'+
@@ -1462,6 +1476,159 @@ function renderSettings(){
      '<button class="btn o" onclick="runMigrate()">开始升级</button>'+
    '</div>';
 }
+/* --- 改销售员名字 --- */
+var RN={from:'',to:'',q:'',pv:null};
+function askRen(){ RN={from:'',to:'',q:'',pv:null}; drawRen() }
+function renList(){
+  var q=mgNorm(RN.q);
+  var names=Object.keys(S.boot.people||{});
+  var list=names.filter(function(n){return !q||mgNorm(n).indexOf(q)>=0}).sort().slice(0,14);
+  if(!list.length)return '<div class="hint">找不到这个名字</div>';
+  return list.map(function(n){
+    var b=(S.boot.people[n]||[])[0];
+    return '<button class="chip'+(RN.from===n?' on':'')+'" onclick="pickRen(\''+
+      esc(n).replace(/'/g,"\\'")+'\')">'+esc(n)+
+      (b?'<span style="opacity:.5;font-size:11px"> · '+esc(b.branch)+'</span>':'')+'</button>';
+  }).join('');
+}
+function drawRen(){
+  openSheet('<div style="font-family:var(--sf);font-size:25px;margin-bottom:3px">改销售员名字</div>'+
+   '<div class="h1s" style="margin-bottom:18px">旧订单会一起改过来</div>'+
+   '<label class="lbl" style="color:var(--bad)">要改的名字</label>'+
+   '<input class="inp" placeholder="打字找…" value="'+esc(RN.q)+'" oninput="RN.q=this.value;refreshRen()" style="margin-bottom:9px">'+
+   '<div class="chips" id="rnL">'+renList()+'</div>'+
+   '<div style="height:16px"></div>'+
+   '<label class="lbl" style="color:var(--ok)">改成</label>'+
+   '<input class="inp" id="rnTo" placeholder="打新名字" value="'+esc(RN.to)+'" oninput="RN.to=this.value;renPreview()">'+
+   '<div id="rnPv"></div>'+
+   '<div style="height:12px"></div><button class="btn o" onclick="closeSheet()">取消</button>');
+}
+function refreshRen(){ var e=document.getElementById('rnL'); if(e)e.innerHTML=renList() }
+function pickRen(n){ RN.from=n; refreshRen(); renPreview() }
+var RNT=null;
+function renPreview(){
+  var pv=document.getElementById('rnPv'); if(!pv)return;
+  if(!RN.from||mgNorm(RN.to).length<2){pv.innerHTML='';return}
+  clearTimeout(RNT);
+  RNT=setTimeout(function(){
+    call('previewRenameSalesman',[{from:RN.from,to:RN.to}]).then(function(r){
+      if(!r.ok){pv.innerHTML='<div class="hint" style="color:var(--bad)">'+esc(r.msg)+'</div>';return}
+      RN.pv=r;
+      pv.innerHTML='<div class="card" style="margin-top:16px;background:rgba(233,168,53,.10);border-color:rgba(233,168,53,.34)">'+
+        '<label class="lbl" style="color:var(--warn)">按下去会发生什么</label>'+
+        '<div class="sumrow"><span class="k">'+esc(r.from)+' 的订单</span><span class="v" style="font-size:16px">'+r.orders+' 笔</span></div>'+
+        '<div class="sumrow"><span class="k">全部改成</span><span class="v" style="font-size:15px;color:var(--ok)">'+esc(r.to)+'</span></div>'+
+        (r.branches&&r.branches.length
+          ?'<div class="sumrow"><span class="k">涉及分行</span><span class="v" style="font-size:13px">'+esc(r.branches.join('、'))+'</span></div>':'')+
+        '<div class="sumrow"><span class="k">金额与抽成</span><span class="v" style="font-size:15px">完全不动</span></div>'+
+        (r.merge
+          ?'<div class="hint" style="margin-top:10px;background:rgba(233,168,53,.13);border-color:rgba(233,168,53,.45);color:var(--warn)">'+
+             '「'+esc(r.to)+'」已经存在 —— 这会把两个名字并成同一个人。</div>':'')+
+        ((r.near&&r.near.length)
+          ?'<div class="hint" style="margin-top:10px;background:rgba(233,168,53,.13);border-color:rgba(233,168,53,.45);color:var(--warn)">'+
+             '⚠ 名单里有很像的：'+r.near.map(function(x){return '<b>'+esc(x)+'</b>'}).join('、')+
+             '<br>确定不是要选这个吗？</div>':'')+
+        '<div class="hint" style="margin-top:10px">改错了再改回来就好，这个动作可以复原。</div>'+
+        '<div style="height:14px"></div>'+
+        '<button class="btn p" onclick="doRen()">'+(r.merge?'确定合并成同一个人':'确定改名')+'</button>'+
+      '</div>';
+    }).catch(function(e){pv.innerHTML='<div class="hint" style="color:var(--bad)">'+esc(String(e.message||e))+'</div>'});
+  },350);
+}
+function doRen(){
+  if(!RN.from||!RN.to){toast('两边都要填','bad');return}
+  openSheet('<div class="load"><div class="spin"></div></div>'+
+    '<div style="text-align:center;color:var(--dim);font-size:14px">改名中…</div>');
+  call('renameSalesman',[{from:RN.from,to:RN.to,by:(S.user||{}).name||''}]).then(function(r){
+    if(!r.ok){toast(r.msg,'bad');closeSheet();return}
+    closeSheet();
+    toast(r.orders+' 笔已改成 '+r.to,'ok');
+    S.boot=null;S.dash=null;S.orders=[];
+    call('bootstrap',[]).then(function(b){S.boot=b;loadSettings()}).catch(function(){loadSettings()});
+  }).catch(function(e){toast(String(e.message||e),'bad')});
+}
+
+/* --- 价目表 --- */
+var PL={list:null,q:'',form:null};
+function askPrice(){
+  PL={list:null,q:'',form:null};
+  openSheet('<div class="load"><div class="spin"></div></div>');
+  call('listSetPrice',[]).then(function(r){
+    if(!r.ok){toast(r.msg||'读不到价目表','bad');closeSheet();return}
+    PL.list=r.list; drawPrice();
+  }).catch(function(e){toast(String(e.message||e),'bad');closeSheet()});
+}
+function drawPrice(){
+  var q=mgNorm(PL.q);
+  var rows=(PL.list||[]).filter(function(x){return !q||mgNorm(x.setType).indexOf(q)>=0});
+  var g={},order=[];
+  rows.forEach(function(x){ if(!g[x.setType]){g[x.setType]=[];order.push(x.setType)} g[x.setType].push(x) });
+  var body=order.map(function(k){
+    return '<div style="margin-bottom:16px">'+
+      '<div class="lbl" style="letter-spacing:.14em;margin-bottom:7px">'+esc(k)+'</div>'+
+      g[k].map(function(x){
+        return '<div class="sumrow" style="align-items:center'+(x.active?'':';opacity:.42')+'">'+
+          '<span class="k" style="flex:1">'+
+            '<b style="color:var(--ink);font-size:15px">RM '+x.price+'</b>'+
+            '<span style="opacity:.65;font-size:12.5px"> · 利 RM '+x.profit+'</span>'+
+            (x.desc?'<br><span style="font-size:12px;opacity:.75">'+esc(x.desc)+'</span>':'')+
+            (x.used?'<br><span style="font-size:11px;opacity:.5">用过 '+x.used+' 笔</span>':'')+
+          '</span>'+
+          '<span style="display:flex;gap:6px">'+
+            '<button class="chip" onclick="priceEdit(\''+esc(x.setType).replace(/'/g,"\\'")+'\','+x.price+')">改</button>'+
+            '<button class="chip" onclick="priceToggle(\''+esc(x.setType).replace(/'/g,"\\'")+'\','+x.price+','+(x.active?'false':'true')+')">'+
+              (x.active?'停用':'恢复')+'</button>'+
+          '</span></div>';
+      }).join('')+'</div>';
+  }).join('') || '<div class="hint">没有符合的</div>';
+
+  openSheet('<div style="font-family:var(--sf);font-size:25px;margin-bottom:3px">价目表</div>'+
+   '<div class="h1s" style="margin-bottom:16px">停用只是从下单页藏起来，历史不受影响</div>'+
+   '<input class="inp" placeholder="找 SET 类型…" value="'+esc(PL.q)+'" oninput="PL.q=this.value;drawPrice()" style="margin-bottom:14px">'+
+   '<button class="btn o" onclick="priceEdit(\'\',0)" style="margin-bottom:16px">＋ 新增一组售价</button>'+
+   body+
+   '<div style="height:12px"></div><button class="btn o" onclick="closeSheet()">关闭</button>');
+}
+function priceEdit(setType,price){
+  var cur=(PL.list||[]).find(function(x){return x.setType===setType&&x.price===price})||null;
+  var types=[...new Set((PL.list||[]).map(function(x){return x.setType}))].sort();
+  openSheet('<div style="font-family:var(--sf);font-size:25px;margin-bottom:3px">'+(cur?'改售价':'新增售价')+'</div>'+
+   '<div class="h1s" style="margin-bottom:18px">'+(cur?esc(setType)+' · RM '+price:'填好按储存')+'</div>'+
+   (cur?'':'<label class="lbl">SET 类型</label>'+
+     '<div class="chips" style="margin-bottom:9px">'+types.map(function(t){
+        return '<button class="chip" onclick="document.getElementById(\'pST\').value=\''+esc(t).replace(/'/g,"\\'")+'\'">'+esc(t)+'</button>'}).join('')+'</div>')+
+   '<input class="inp" id="pST" '+(cur?'disabled':'')+' placeholder="例：10 ITEMS" value="'+esc(setType)+'" style="margin-bottom:12px">'+
+   '<div class="row" style="margin-bottom:12px">'+
+     '<div><div class="lbl" style="letter-spacing:.14em">售价 RM</div>'+
+       '<input class="inp" id="pPR" inputmode="decimal" '+(cur?'disabled':'')+' value="'+(price||'')+'"></div>'+
+     '<div><div class="lbl" style="letter-spacing:.14em">每 set 利润 RM</div>'+
+       '<input class="inp" id="pPF" inputmode="decimal" value="'+(cur?cur.profit:'')+'"></div>'+
+   '</div>'+
+   '<label class="lbl">给司机看的说明（选填）</label>'+
+   '<input class="inp" id="pDS" placeholder="例：好的雨伞 / 普通雨伞" value="'+esc(cur?cur.desc:'')+'" style="margin-bottom:6px">'+
+   '<div class="hint" style="margin-bottom:14px">这句会印在送货单上，让 TAN 一看就知道拿哪一款。</div>'+
+   '<button class="btn p" onclick="priceSave()">储存</button>'+
+   '<div style="height:8px"></div><button class="btn o" onclick="askPrice()">返回</button>');
+}
+function priceSave(){
+  var st=document.getElementById('pST').value, pr=document.getElementById('pPR').value,
+      pf=document.getElementById('pPF').value, ds=document.getElementById('pDS').value;
+  call('saveSetPrice',[{setType:st,price:pr,profit:pf,desc:ds,by:(S.user||{}).name||''}]).then(function(r){
+    if(!r.ok){toast(r.msg,'bad');return}
+    toast(r.updated?'已更新':'已新增','ok');
+    S.boot=null;
+    call('bootstrap',[]).then(function(b){S.boot=b;askPrice()}).catch(function(){askPrice()});
+  }).catch(function(e){toast(String(e.message||e),'bad')});
+}
+function priceToggle(setType,price,active){
+  call('toggleSetPrice',[{setType:setType,price:price,active:active,by:(S.user||{}).name||''}]).then(function(r){
+    if(!r.ok){toast(r.msg,'bad');return}
+    toast(active?'已恢复':'已停用，下单页看不到了','ok');
+    S.boot=null;
+    call('bootstrap',[]).then(function(b){S.boot=b;askPrice()}).catch(function(){askPrice()});
+  }).catch(function(e){toast(String(e.message||e),'bad')});
+}
+
 /* --- 合并分行 --- */
 var MG={from:'',to:'',q1:'',q2:'',pv:null};
 function askMerge(){ MG={from:'',to:'',q1:'',q2:'',pv:null}; drawMerge() }
