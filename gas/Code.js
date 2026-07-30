@@ -1652,6 +1652,90 @@ function saveSetPrice(p) {
   return { ok: true, updated: !!hit, setType: st, price: pr, profit: pf, desc: desc };
 }
 
+/* ═════════════════════════════════════════════════════════
+ * 一次性：客户第二轮回覆确认後的分行整并（2026-07-30）
+ * 在 Apps Script 编辑器选这个函式按 Run。
+ * 每一步先用线上真实资料算一次，对不上预期就立刻中止。
+ * 跑完把这个函式删掉。
+ * ═════════════════════════════════════════════════════════ */
+function RUN_MERGE_20260730() {
+  var log = [], abort = null;
+  function say(s) { log.push(s); }
+
+  function snap() {
+    var t = readTable_('ORDERS'), n = 0, inc = 0, mine = 0, fee = 0;
+    t.rows.forEach(function (r) {
+      if (isVoid_(r)) return;
+      n++; inc += toNum_(r.TOTAL_INCOME); mine += toNum_(r.MY_INCOME); fee += toNum_(r.DRIVER_FEE);
+    });
+    return { n: n, inc: Math.round(inc * 100) / 100,
+             mine: Math.round(mine * 100) / 100, fee: Math.round(fee * 100) / 100 };
+  }
+
+  var before = snap();
+  say('【开始前】' + before.n + ' 笔｜营业额 RM ' + before.inc +
+      '｜利润 RM ' + before.mine + '｜司机抽成 RM ' + before.fee);
+
+  // [从, 到, 预期笔数, 预期是改名?]
+  // EMAS → EMAS PUTRAJAYA 不在名单里：底下还有两笔柔佛单（VP00401 / VP00742）
+  // 归属未定，合了会把柔佛营业额算进雪兰莪，也会给司机他没送过的抽成。
+  var PLAN = [
+    ['PROTON TAMAN MIDAS',      'PROTON TAMAN MIDAH', 1, true ],
+    ['PROTON MIDAH',            'PROTON TAMAN MIDAH', 2, false],
+    ['PERODUA NILAI IMPIAN',    'PERODUA NILAI',      7, false],
+    ['JAECOO SEREMBAN',         'JAECOO SEREMBAN 2',  2, false],
+    ['PROTON IOI PUTRAJAYA',    'PROTON PUTRAJAYA',   1, false],
+    ['PROTON PUTRAJAYA - EMAS', 'EMAS PUTRAJAYA',     1, false]
+  ];
+
+  for (var i = 0; i < PLAN.length && !abort; i++) {
+    var from = PLAN[i][0], to = PLAN[i][1], expN = PLAN[i][2], expRename = PLAN[i][3];
+    var tag = '[' + (i + 1) + '] ' + from + ' → ' + to;
+
+    var p = previewMergeBranch({ from: from, to: to });
+    if (!p.ok) { abort = tag + ' 预览失败：' + p.msg; break; }
+    if (p.orders !== expN) { abort = tag + ' 中止：预期 ' + expN + ' 笔，实际 ' + p.orders + ' 笔'; break; }
+    if (Math.abs(p.feeDiff) > 0.005) { abort = tag + ' 中止：抽成会变动 RM ' + p.feeDiff + '，预期 0'; break; }
+    if (!!p.rename !== expRename) { abort = tag + ' 中止：预期' + (expRename ? '改名' : '合并') + '，实际是' + (p.rename ? '改名' : '合并'); break; }
+
+    var r = mergeBranch({ from: from, to: to, by: 'MERGE-20260730' });
+    if (!r.ok) { abort = tag + ' 执行失败：' + r.msg; break; }
+    say(tag + '｜' + (r.rename ? '改名' : '合并') + ' ' + r.orders + ' 笔｜销售员 ' + r.salesmen + ' 行｜抽成变动 RM ' + r.feeDiff);
+  }
+
+  var after = snap();
+  say('【结束後】' + after.n + ' 笔｜营业额 RM ' + after.inc +
+      '｜利润 RM ' + after.mine + '｜司机抽成 RM ' + after.fee);
+
+  var same = before.n === after.n &&
+             Math.abs(before.inc - after.inc) < 0.005 &&
+             Math.abs(before.mine - after.mine) < 0.005 &&
+             Math.abs(before.fee - after.fee) < 0.005;
+  say(same ? '✓ 对帐通过：笔数、营业额、利润、司机抽成四项完全没变'
+           : '✗ 对帐不符！笔数 ' + (after.n - before.n) +
+             '｜营业额 ' + Math.round((after.inc - before.inc) * 100) / 100 +
+             '｜利润 ' + Math.round((after.mine - before.mine) * 100) / 100 +
+             '｜抽成 ' + Math.round((after.fee - before.fee) * 100) / 100);
+
+  if (abort) say('■ 已中止：' + abort + '（中止前的步骤已生效，之後的都没做）');
+
+  var left = readTable_('ORDERS').rows.filter(function (r) {
+    return up_(r.BRANCH) === 'EMAS' && !isVoid_(r);
+  });
+  if (left.length) {
+    say('── 没有动、留给客户决定的 ──');
+    left.forEach(function (r) {
+      say('　' + r.ORDER_ID + '｜' + r.DATE + '｜' + r.STATE + '/' + r.REGION + '｜' +
+          r.SALESMAN + '｜' + r.SET_TYPE + ' ' + r.QTY + '×' + r.UNIT_PRICE + '｜RM ' + r.TOTAL_INCOME);
+    });
+    say('　→ 两笔柔佛单要先各自归位，「EMAS」才能并去 EMAS PUTRAJAYA。');
+  }
+
+  var out = log.join('\n');
+  Logger.log(out);
+  return out;
+}
+
 /*******************************************************
  * V&P TRADING — 一次性安装器
  * 直接读取现有的 January…December 分页，
