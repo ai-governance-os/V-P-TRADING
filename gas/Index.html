@@ -1474,13 +1474,9 @@ function renderSettings(){
        '不用的价钱按「停用」就会从下单页消失，历史订单不受影响，随时可以恢复。</div>'+
      '<button class="btn o" onclick="askPrice()">管理价目表</button>'+
    '</div>'+
-   '<div class="card">'+
-     '<div style="font-size:14.5px;font-weight:600;margin-bottom:7px">升级付款资料</div>'+
-     '<div style="color:var(--dim);font-size:13px;line-height:1.65;margin-bottom:14px">'+
-       '把旧的 OP / PC 写法转成新格式（已收钱 + 收款方式 + 日期 + 备注）。<br>'+
-       '只需要跑一次，跑第二次不会重复处理，也不会弄坏资料。</div>'+
-     '<button class="btn o" onclick="runMigrate()">开始升级</button>'+
-   '</div>';
+   '';   // 「升级付款资料」已经跑完，按钮拿掉 —— 那是一次性迁移，
+         // 留在介面上只会让人误按。後端 migratePayment 还在，
+         // 真要再跑就从 Apps Script 编辑器执行。
 }
 /* --- 改销售员名字 --- */
 var RN={from:'',to:'',q:'',pv:null};
@@ -1742,41 +1738,7 @@ function doMerge(){
   }).catch(function(e){toast(String(e.message||e),'bad')});
 }
 
-function runMigrate(){
-  openSheet('<div style="font-family:var(--sf);font-size:25px;margin-bottom:3px">升级付款资料</div>'+
-   '<div class="h1s" style="margin-bottom:18px">跑一次就好</div>'+
-   '<div class="card" style="padding:14px 15px">'+
-     '<div style="font-size:13.5px;color:var(--dim);line-height:1.75">'+
-       '会做两件事：<br>'+
-       '① 把旧的 OP / PC 拆成「收款方式 + 日期 + 备注」<br>'+
-       '② <b style="color:var(--bad)">抓不到收款日期的，改成「还没收钱」</b><br><br>'+
-       '每一笔之后都能在订单页手动改回来，重复跑也不会重复处理。</div>'+
-   '</div>'+
-   '<button class="btn p" onclick="doMigrate()">确定，开始升级</button>'+
-   '<div style="height:9px"></div><button class="btn o" onclick="closeSheet()">取消</button>');
-}
-function doMigrate(){
-  openSheet('<div class="load"><div class="spin"></div></div>'+
-    '<div style="text-align:center;color:var(--dim);font-size:14px">升级中，1000 多笔要一点时间…</div>');
-  call('migratePayment',[AUTH]).then(function(r){
-    if(!r.ok){toast(r.msg,'bad');return}
-    var s=r.stat;
-    openSheet('<div class="ok-ic">✓</div>'+
-     '<div style="text-align:center;font-family:var(--sf);font-size:26px;margin-bottom:18px">升级完成</div>'+
-     '<div class="card">'+
-       '<div class="sumrow"><span class="k">总共处理</span><span class="v">'+r.total+' 笔</span></div>'+
-       '<div class="sumrow"><span class="k">已收钱</span><span class="v" style="color:var(--ok)">'+s.paid+' 笔</span></div>'+
-       '<div class="sumrow"><span class="k">　· 转账 OP</span><span class="v" style="font-size:16px">'+s.op+'</span></div>'+
-       '<div class="sumrow"><span class="k">　· 现金 PC</span><span class="v" style="font-size:16px">'+s.pc+'</span></div>'+
-       '<div class="sumrow"><span class="k">还没收钱</span><span class="v" style="color:var(--bad)">'+s.unpaid+' 笔</span></div>'+
-       (s.fixed?'<div class="sumrow"><span class="k">　· 修正回来的（本来被误记成已收）</span><span class="v" style="font-size:16px;color:var(--warn)">'+s.fixed+'</span></div>':'')+
-       (s.noMethod?'<div class="sumrow"><span class="k">收了但没写方式（等你补）</span><span class="v" style="font-size:16px;color:var(--warn)">'+s.noMethod+' 笔</span></div>':'')+
-       (s.skipped?'<div class="sumrow"><span class="k">已是新格式（略过）</span><span class="v" style="font-size:16px">'+s.skipped+'</span></div>':'')+
-     '</div>'+
-     '<button class="btn p" onclick="closeSheet();S.dash=null;go(\'dash\')">去看未收款</button>'+
-     '<div style="height:9px"></div><button class="btn o" onclick="closeSheet()">关闭</button>');
-  }).catch(function(e){toast(String(e.message||e),'bad')});
-}
+// runMigrate / doMigrate 已移除 —— 一次性迁移跑完了，介面上不再提供。
 function saveDriver(){
   var p={name:document.getElementById('dvName').value,
          phone:document.getElementById('dvPhone').value,
