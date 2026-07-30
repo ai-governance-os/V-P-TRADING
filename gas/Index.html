@@ -1474,9 +1474,13 @@ function renderSettings(){
        '不用的价钱按「停用」就会从下单页消失，历史订单不受影响，随时可以恢复。</div>'+
      '<button class="btn o" onclick="askPrice()">管理价目表</button>'+
    '</div>'+
-   '';   // 「升级付款资料」已经跑完，按钮拿掉 —— 那是一次性迁移，
-         // 留在介面上只会让人误按。後端 migratePayment 还在，
-         // 真要再跑就从 Apps Script 编辑器执行。
+   '<div class="card">'+
+     '<div style="font-size:14.5px;font-weight:600;margin-bottom:7px">检查付款资料</div>'+
+     '<div style="color:var(--dim);font-size:13px;line-height:1.65;margin-bottom:14px">'+
+       '补上缺漏的收款日期，并回报有没有格式不对的资料。<br>'+
+       '不会改动金额、数量或分行，随时可以按，按几次结果都一样。</div>'+
+     '<button class="btn o" onclick="runCheck()">开始检查</button>'+
+   '</div>';
 }
 /* --- 改销售员名字 --- */
 var RN={from:'',to:'',q:'',pv:null};
@@ -1738,7 +1742,52 @@ function doMerge(){
   }).catch(function(e){toast(String(e.message||e),'bad')});
 }
 
-// runMigrate / doMigrate 已移除 —— 一次性迁移跑完了，介面上不再提供。
+/* 付款资料健检。
+   底层还是 migratePayment —— 它对已经是新格式的资料只做一件事：
+   把「已收钱但没写收款日期」的补上订单日期。补过就不会再补，所以可以随时按。 */
+function runCheck(){
+  openSheet('<div style="font-family:var(--sf);font-size:25px;margin-bottom:3px">检查付款资料</div>'+
+   '<div class="h1s" style="margin-bottom:18px">随时可以按</div>'+
+   '<div class="card" style="padding:14px 15px">'+
+     '<div style="font-size:13.5px;color:var(--dim);line-height:1.75">'+
+       '会做两件事：<br>'+
+       '① 「已收钱」但没写收款日期的，用订单日期补上<br>'+
+       '② 回报有没有格式不对、需要人看一眼的资料<br><br>'+
+       '<b style="color:var(--ok)">不会改动任何金额、数量或分行。</b>'+
+       '已经正常的资料会直接略过，按几次结果都一样。</div>'+
+   '</div>'+
+   '<button class="btn p" onclick="doCheck()">开始检查</button>'+
+   '<div style="height:9px"></div><button class="btn o" onclick="closeSheet()">取消</button>');
+}
+function doCheck(){
+  openSheet('<div class="load"><div class="spin"></div></div>'+
+    '<div style="text-align:center;color:var(--dim);font-size:14px">检查中，1000 多笔要一点时间…</div>');
+  call('migratePayment',[AUTH]).then(function(r){
+    if(!r.ok){toast(r.msg,'bad');return}
+    var s=r.stat||{};
+    var fixedDate=s.backfilled||0;
+    var oldFmt=(s.paid||0)+(s.unpaid||0);      // 还是旧格式、这次被转过来的
+    var clean=fixedDate===0&&oldFmt===0;
+    openSheet('<div class="ok-ic">✓</div>'+
+     '<div style="text-align:center;font-family:var(--sf);font-size:26px;margin-bottom:6px">检查完成</div>'+
+     '<div class="h1s" style="text-align:center;margin-bottom:18px">'+
+       (clean?'一切正常，没有需要处理的':'已经帮你补好了')+'</div>'+
+     '<div class="card">'+
+       '<div class="sumrow"><span class="k">检查了</span><span class="v">'+r.total+' 笔</span></div>'+
+       '<div class="sumrow"><span class="k">补上收款日期</span><span class="v"'+
+         (fixedDate?' style="color:var(--ok)"':'')+'>'+fixedDate+' 笔</span></div>'+
+       (oldFmt
+         ?'<div class="sumrow"><span class="k" style="color:var(--warn)">格式不对、已转正</span>'+
+            '<span class="v" style="color:var(--warn)">'+oldFmt+' 笔</span></div>'
+         :'')+
+       '<div class="sumrow"><span class="k">本来就正常</span><span class="v" style="font-size:16px">'+
+         (s.skipped||0)+' 笔</span></div>'+
+     '</div>'+
+     '<div class="hint" style="margin-top:12px">金额、数量、分行完全没有变动。</div>'+
+     '<div style="height:14px"></div>'+
+     '<button class="btn p" onclick="closeSheet()">好</button>');
+  }).catch(function(e){toast(String(e.message||e),'bad')});
+}
 function saveDriver(){
   var p={name:document.getElementById('dvName').value,
          phone:document.getElementById('dvPhone').value,
