@@ -521,9 +521,14 @@ function acSearch(q){
   var starts=[],inc=[];
   names.forEach(function(n){ if(n.indexOf(Q)===0)starts.push(n); else if(n.indexOf(Q)>=0)inc.push(n) });
   acCur=starts.concat(inc).slice(0,9); acHl=-1; acRender(acCur);
-  // 唯一匹配 → 自动带出
+  // 名字完全对上 → 自动带出分行。
+  // 但如果使用者已经自己挑过分行（同一个人有两三间），就不要把他挑的那间
+  // 重设回第一间 —— 重画页面後输入框会重新 focus，这里会再跑一次。
   var ex=S.boot.people[Q];
-  if(ex){ setPerson(Q, ex[0]); }
+  if(ex){
+    var picked=F.branch&&ex.some(function(x){return x.branch===F.branch});
+    if(picked)F.salesman=Q; else setPerson(Q, ex[0]);
+  }
 }
 function acRender(list){
   var el=document.getElementById('aclist'); if(!el)return;
@@ -800,7 +805,7 @@ function branchRows(list){
     var on=BR.pick&&BR.pick.branch===b.branch;
     return '<button class="oi" style="width:100%;text-align:left;margin-bottom:7px;'+
       (on?'border-color:var(--gold);background:var(--goldsoft)':'')+'" '+
-      'onclick="pickBranch(\''+esc(b.branch).replace(/'/g,"\\'")+'\')">'+
+      'onclick="brPick(\''+esc(b.branch).replace(/'/g,"\\'")+'\')">'+
       '<div class="b">'+esc(b.branch)+'</div>'+
       '<div class="s">'+esc(b.state||'')+(b.region?' · '+esc(b.region):'')+'</div></button>'}).join('');
 }
@@ -811,7 +816,8 @@ function drawBranchList(){
     return b.branch.toUpperCase().indexOf(BR.q.toUpperCase())>=0}).slice(0,40);
   el.innerHTML=branchRows(list);
 }
-function pickBranch(name){
+/** 换分行弹窗里选目标分行。名字不能叫 pickBranch —— 下单页已经有一个同名的，会互相盖掉。 */
+function brPick(name){
   var pv=document.getElementById('brpv');
   if(pv)pv.innerHTML='<div class="load"><div class="spin"></div></div>';
   call('previewBranch',[{id:BR.id,branch:name}]).then(function(r){
