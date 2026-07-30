@@ -1,3 +1,6 @@
+/** 由 GitHub Actions 在部署时填入 commit SHA；用来验证线上真的更新了 */
+var BUILD_ID = '__BUILD_ID__';
+
 /*******************************************************
  * V&P TRADING — 销售 / 送货 / 司机抽成 系统
  * Google Apps Script 后端
