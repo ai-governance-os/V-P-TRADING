@@ -7,15 +7,22 @@ on:
     paths:
       - 'gas/**'
       - '.github/workflows/deploy-apps-script.yml'
-  workflow_dispatch:        # 也可以在 Actions 页手动跑
+  workflow_dispatch:
 
 concurrency:
   group: deploy-apps-script
-  cancel-in-progress: false   # 部署不要互相取消，排队执行
+  cancel-in-progress: false
+
+env:
+  SCRIPT_ID: 1YBkz-3d8QEi4zN1OrfaxJwV4Hr8aP18ntgBlvlO-qO8bMo1bJ60vsy_B
+  DEPLOYMENT_ID: AKfycbwv-QmaPM0i-B1ud8hWUAtbtz0wtQlpuzwmMIY1l7L2e7PRDurbEblJrQI9eVHmp1Sr8w
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -euo pipefail {0}     # 任何一行失败就整个 job 失败
     steps:
       - uses: actions/checkout@v4
 
@@ -23,11 +30,20 @@ jobs:
         with:
           node-version: '20'
 
-      # 语法先过一遍，坏的程式不要推上去
+      # gas/ 里只能有一个后端档。Code.gs 和 Code.js 会映射到同一个
+      # Apps Script 档名，两份并存会互相覆盖，而且不会报错。
+      - name: 防呆：不准有重复的后端档
+        run: |
+          dupes=$(ls gas/ | grep -iE '^(Code|Setup|Maint)\.gs$' || true)
+          if [ -n "$dupes" ]; then
+            echo "gas/ 里有会跟 Code.js 撞名的档案："; echo "$dupes"
+            echo "请删掉，只留 gas/Code.js"; exit 1
+          fi
+          echo "OK：后端只有 Code.js"
+
       - name: 语法检查
         run: |
-          cp gas/Code.js /tmp/Code.js
-          node --check /tmp/Code.js
+          node --check gas/Code.js
           node -e "
             const fs=require('fs');
             const html=fs.readFileSync('gas/Index.html','utf8');
@@ -41,26 +57,57 @@ jobs:
       - name: 安装 clasp
         run: npm install -g @google/clasp@2.4.2
 
-      - name: 写入授权
+      # 旧版只检查 secret 非空 —— token 过期照样放行，於是绿灯但什么都没推。
+      # 这里真的问 clasp「你登入了吗」。
+      - name: 写入授权并验证
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
         run: |
           printf '%s' "$CLASPRC_JSON" > ~/.clasprc.json
           test -s ~/.clasprc.json || { echo "CLASPRC_JSON secret 是空的"; exit 1; }
-        env:
-          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+          clasp login --status 2>&1 | tee /tmp/who.txt || true
+          if ! grep -qi "logged in" /tmp/who.txt; then
+            echo "──────────────────────────────────────────"
+            echo "clasp 授权失效了。请在本机跑 clasp login，"
+            echo "再把 ~/.clasprc.json 的内容更新到 GitHub secret CLASPRC_JSON。"
+            echo "──────────────────────────────────────────"
+            exit 1
+          fi
+
+      # 把 commit SHA 埋进两个档，等一下用它验证线上真的换了
+      - name: 埋 BUILD_ID
+        run: |
+          SHA="${GITHUB_SHA::7}"
+          sed -i "s/__BUILD_ID__/$SHA/g" gas/Code.js gas/Index.html
+          grep -q "$SHA" gas/Code.js || { echo "Code.js 里找不到 __BUILD_ID__ 佔位符"; exit 1; }
+          echo "BUILD_ID = $SHA"
 
       - name: 推上 Apps Script
         working-directory: gas
-        run: clasp push --force
+        run: |
+          clasp push --force 2>&1 | tee /tmp/push.txt
+          grep -qiE "pushed|files" /tmp/push.txt || { echo "clasp push 没有推上任何档案"; exit 1; }
 
-      # 更新「同一个」部署 → 网址不会变
+      # 关键：把线上内容抓回来，确认真的是这一版。
+      # 这一步存在之後，「绿灯但没上线」不可能再发生。
+      - name: 验证线上真的换了
+        run: |
+          SHA="${GITHUB_SHA::7}"
+          rm -rf /tmp/verify && mkdir -p /tmp/verify && cd /tmp/verify
+          printf '{"scriptId":"%s","rootDir":"."}' "$SCRIPT_ID" > .clasp.json
+          clasp pull
+          ok=1
+          grep -q "$SHA" Code.js   || { echo "✗ 线上 Code.js 不是 $SHA";   ok=0; }
+          grep -q "$SHA" Index.html || { echo "✗ 线上 Index.html 不是 $SHA"; ok=0; }
+          [ "$ok" = 1 ] || { echo "部署没有生效 —— 线上还是旧版"; exit 1; }
+          echo "✓ 线上 Code.js 与 Index.html 都是 $SHA"
+
       - name: 更新线上部署
         working-directory: gas
         run: |
           clasp deploy \
             --deploymentId "$DEPLOYMENT_ID" \
             --description "GitHub ${GITHUB_SHA::7} — ${GITHUB_ACTOR}"
-        env:
-          DEPLOYMENT_ID: AKfycbwv-QmaPM0i-B1ud8hWUAtbtz0wtQlpuzwmMIY1l7L2e7PRDurbEblJrQI9eVHmp1Sr8w
 
       - name: 完成
-        run: echo "已部署 → https://v-p-trading.vercel.app"
+        run: echo "已部署 ${GITHUB_SHA::7} → https://v-p-trading.vercel.app"
