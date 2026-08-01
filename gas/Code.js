@@ -1750,6 +1750,8 @@ function RUN_MERGE_20260730() {
  * 抬头有时是销售员本人有时是公司、要印地址与银行户口。
  * ═════════════════════════════════════════════════════════ */
 
+var VP_LOGO_ = 'data:image/png;base64,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';
+
 var VP_INFO_ = {
   name: 'V & P TRADING',
   ssm: '202403282822 (AS0486263-A)',
@@ -1779,6 +1781,9 @@ function gradeEn_(desc) {
  */
 function invNameOf_(setType, desc) {
   var st = up_(setType).trim(), g = gradeEn_(desc);
+  // 价目表还没填「普通/好的」的，一律当 NORMAL。
+  // 宁可全部一致，也不要同一份发票上有的写等级有的不写 —— 那才会被会计问。
+  if (!g) g = 'NORMAL';
   var m = st.match(/(\d+)\s*ITEMS/);
   if (m) return (g ? g + ' ' : '') + 'GOODIES BAGS PACKAGE (' + m[1] + ' ITEMS)';
   if (/UMBRELLA/.test(st)) {
@@ -1893,12 +1898,23 @@ function listInvoiceMonth(p) {
   var yy = '20' + ym.slice(0, 2), mm = parseInt(ym.slice(2), 10);
 
   var t = ensureCols_('ORDERS', ['INVOICE_TO']);
+  var sp = ensureCols_('SET_PRICE', ['说明', '英文品名']);
+  var graded = {};
+  sp.rows.forEach(function (r) {
+    if (!r.SET_TYPE) return;
+    var k = up_(r.SET_TYPE) + '|' + toNum_(r.UNIT_PRICE);
+    if (String(r['说明'] || '').trim() || String(r['英文品名'] || '').trim()) graded[k] = 1;
+  });
+  var needMap = {};
   var g = {};
   t.rows.forEach(function (r) {
     if (isVoid_(r)) return;
     // DATE 在表里是日期物件不是字串，一定要经过 fmtDate_
     var d = fmtDate_(r.DATE);
     if (d.slice(0, 4) !== yy || parseInt(String(r.MONTH), 10) !== mm) return;
+    var gk = up_(r.SET_TYPE) + '|' + toNum_(r.UNIT_PRICE);
+    if (!graded[gk] && !DESC_FALLBACK_[gk] && !/^BAGS?$/.test(up_(r.SET_TYPE)))
+      needMap[String(r.SET_TYPE).trim() + ' RM ' + toNum_(r.UNIT_PRICE)] = 1;
     var mode = up_(r.INVOICE_TO) === 'COMPANY' ? 'COMPANY' : 'SA';
     var key = custKey_(r);
     if (!g[key]) {
@@ -1910,6 +1926,7 @@ function listInvoiceMonth(p) {
     g[key].n++; g[key].amount += toNum_(r.TOTAL_INCOME);
   });
 
+  var need = Object.keys(needMap).sort();
   var issued = {};
   invSheet_().rows.forEach(function (r) {
     if (String(r.YM) === ym) issued[up_(r.CUST_KEY)] = String(r.INV_NO);
@@ -1921,7 +1938,7 @@ function listInvoiceMonth(p) {
     return g[k];
   }).sort(function (a, b) { return b.amount - a.amount; });
 
-  return { ok: true, ym: ym, list: list };
+  return { ok: true, ym: ym, list: list, needGrade: need };
 }
 
 /** 组一张发票的完整资料（不配号码，纯预览用 preview=true） */
@@ -2011,6 +2028,7 @@ function invoiceHtml_(iv, invNo) {
 
     /* ── 抬头 ── */
     + '<div style="text-align:center;margin-bottom:6px">'
+    + '<img src="' + VP_LOGO_ + '" width="62" height="62" style="margin-bottom:2px"><br>'
     + '<div style="font-size:20pt;font-weight:bold;letter-spacing:2px">' + esc_(C.name) + '</div>'
     + '<div style="font-size:8.5pt;color:#555;margin-top:3px">' + esc_(C.ssm) + '</div>'
     + '<div style="font-size:9pt;color:#333;margin-top:4px">' + esc_(C.addr).replace(/\n/g, '<br>') + '</div>'

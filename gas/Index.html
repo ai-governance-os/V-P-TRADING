@@ -1248,7 +1248,7 @@ function loadInv(ym){
     '<div style="text-align:center;color:var(--dim);font-size:14px">整理中…</div>');
   call('listInvoiceMonth',[{ym:ym}]).then(function(r){
     if(!r.ok){toast(r.msg,'bad');drawInvPick();return}
-    IV.list=r.list; drawInvList();
+    IV.list=r.list; IV.need=r.needGrade||[]; drawInvList();
   }).catch(function(e){toast(String(e.message||e),'bad');drawInvPick()});
 }
 function drawInvList(){
@@ -1271,6 +1271,11 @@ function drawInvList(){
   openSheet('<div style="font-family:var(--sf);font-size:25px;margin-bottom:3px">开发票</div>'+
    '<div class="h1s" style="margin-bottom:16px">'+ymLabel(IV.ym)+' · '+L.length+' 个客户</div>'+
    '<button class="btn o" onclick="drawInvPick()" style="margin-bottom:16px">换一个月</button>'+
+   ((IV.need&&IV.need.length)
+     ?'<div class="hint" style="margin-bottom:16px;background:rgba(233,168,53,.11);border-color:rgba(233,168,53,.4);color:var(--warn)">'+
+        '⚠ 这几组价目还没填「普通 / 好的」，发票上会一律当 NORMAL：<br><b>'+
+        IV.need.map(esc).join('</b>、<b>')+'</b><br>'+
+        '要改的话到 设定 → 价目表。</div>':'')+
    body+
    '<div style="height:14px"></div><button class="btn o" onclick="closeSheet()">关闭</button>');
 }
