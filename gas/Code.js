@@ -1896,7 +1896,8 @@ function listInvoiceMonth(p) {
   var g = {};
   t.rows.forEach(function (r) {
     if (isVoid_(r)) return;
-    var d = String(r.DATE || '');
+    // DATE 在表里是日期物件不是字串，一定要经过 fmtDate_
+    var d = fmtDate_(r.DATE);
     if (d.slice(0, 4) !== yy || parseInt(String(r.MONTH), 10) !== mm) return;
     var mode = up_(r.INVOICE_TO) === 'COMPANY' ? 'COMPANY' : 'SA';
     var key = custKey_(r);
@@ -1936,13 +1937,15 @@ function getInvoice(p) {
   var lines = [], sub = 0, qty = 0, gross = 0;
   t.rows.forEach(function (r) {
     if (isVoid_(r) || custKey_(r) !== key) return;
-    var d = String(r.DATE || '');
+    // DATE 在表里是日期物件不是字串，一定要经过 fmtDate_
+    var d = fmtDate_(r.DATE);
     if (d.slice(0, 4) !== yy || parseInt(String(r.MONTH), 10) !== mm) return;
     var q = toNum_(r.QTY), pr = toNum_(r.UNIT_PRICE), tot = toNum_(r.TOTAL_INCOME);
     var brand = String(r.BRAND || '').trim();
     var nm = invNameFor_(r.SET_TYPE, pr);
     lines.push({
       date: shortDate_(d),
+      iso: d,
       desc: (brand && brand !== 'OTHER' ? brand + ' ' : '') + nm,
       qty: q, unit: unitOf_(r.SET_TYPE), price: pr,
       amount: Math.round(q * pr * 100) / 100,
@@ -1952,7 +1955,7 @@ function getInvoice(p) {
   });
   if (!lines.length) return { ok: false, msg: '这个月这位客户没有订单' };
 
-  lines.sort(function (a, b) { return a.date < b.date ? -1 : 1; });
+  lines.sort(function (a, b) { return a.iso < b.iso ? -1 : 1; });   // 用 ISO 排，别用 dd.mm.yy
   gross = Math.round(gross * 100) / 100;
   sub = Math.round(sub * 100) / 100;
   var disc = Math.round((gross - sub) * 100) / 100;
