@@ -247,7 +247,7 @@ var F={ // 表单
   salesman:'',branch:'',brand:'',state:'',region:'',setType:'',price:0,profit:0,qty:1,
   paid:false,payMethod:'OP',payDate:'',payNote:'',
   drvColor:'',drvGrade:'',drvNote:'',drvDesc:'',
-  note:'',ovTotal:'',ovMine:'',ovFee:''
+  note:'',ovTotal:'',ovMine:'',ovFee:'',invoiceTo:'SA'
 };
 /** 记住上次选的颜色，同一间分行多半一样 */
 function rememberDrv(){ try{ if(F.drvColor) LASTCOLOR=F.drvColor }catch(e){} }
@@ -641,6 +641,12 @@ function saveSalesman(){
 }
 
 /* --- 进阶 --- */
+function pickIvTo(v){
+  F.invoiceTo=v;
+  var e=document.getElementById('ivTo'); if(!e)return;
+  e.innerHTML='<button class="chip'+(v!=='COMPANY'?' on':'')+'" onclick="pickIvTo(\'SA\')">销售员本人</button>'+
+              '<button class="chip'+(v==='COMPANY'?' on':'')+'" onclick="pickIvTo(\'COMPANY\')">车行公司</button>';
+}
 function advSheet(){
   openSheet('<div style="font-family:var(--sf);font-size:25px;margin-bottom:4px">进阶设定</div>'+
    '<div class="h1s" style="margin-bottom:20px">特别价 / 手动调整</div>'+
@@ -650,6 +656,13 @@ function advSheet(){
    '<input class="inp" id="ovM" inputmode="decimal" placeholder="自动：RM '+rm(F.qty*F.profit)+'" value="'+F.ovMine+'">'+
    '<div style="height:13px"></div><label class="lbl">司机抽成（留空 = 自动）</label>'+
    '<input class="inp" id="ovF" inputmode="decimal" placeholder="自动：RM '+rm(calcFee())+'" value="'+F.ovFee+'">'+
+   '<div style="height:16px"></div>'+
+   '<label class="lbl">发票开给谁</label>'+
+   '<div class="chips" id="ivTo" style="margin-bottom:6px">'+
+     '<button class="chip'+(F.invoiceTo!=='COMPANY'?' on':'')+'" onclick="pickIvTo(\'SA\')">销售员本人</button>'+
+     '<button class="chip'+(F.invoiceTo==='COMPANY'?' on':'')+'" onclick="pickIvTo(\'COMPANY\')">车行公司</button>'+
+   '</div>'+
+   '<div class="hint" style="margin-bottom:14px">月尾开发票时会照这个分。会记住上一次选的。</div>'+
    '<div style="height:13px"></div><label class="lbl">备注</label>'+
    '<input class="inp" id="ovN" placeholder="选填" value="'+esc(F.note)+'">'+
    '<div style="height:22px"></div><button class="btn p" onclick="advSave()">套用</button>');
@@ -669,7 +682,8 @@ function submit(){
     setType:F.setType,price:F.price,profitPerSet:F.profit,qty:F.qty,note:F.note,
     payStatus:F.paid?'PAID':'UNPAID',payMethod:F.payMethod,payDate:F.payDate||today(),payNote:F.payNote,
     drvColor:F.drvColor,drvGrade:F.drvGrade||F.drvDesc,drvNote:F.drvNote,
-    totalOverride:F.ovTotal,myIncomeOverride:F.ovMine,driverFeeOverride:F.ovFee,by:S.user.name}])
+    totalOverride:F.ovTotal,myIncomeOverride:F.ovMine,driverFeeOverride:F.ovFee,
+    invoiceTo:F.invoiceTo,by:S.user.name}])
   .then(function(r){
     btn.removeAttribute('disabled');btn.textContent='确认下单';
     if(!r.ok){toast(r.msg,'bad');return}
@@ -993,6 +1007,14 @@ function renderDash(){
      '<button class="btn o" style="padding:12px;font-size:14px" onclick="askMonthly()">下载月报 Excel →</button>'+
    '</div>':'')+
 
+   (admin?'<div class="card">'+
+     '<label class="lbl">发票 Invoice</label>'+
+     '<div style="color:var(--dim);font-size:13px;line-height:1.7;margin-bottom:13px">'+
+       '选月份，帮每个客户产生一张发票 PDF。<br>'+
+       '同一个客户当月所有订单列在同一张，号码开过就不会变。</div>'+
+     '<button class="btn o" style="padding:12px;font-size:14px" onclick="askInv()">开发票 →</button>'+
+   '</div>':'')+
+
    (d.months.length>1?'<div class="card"><label class="lbl">每月营业额</label>'+
      d.months.map(function(m){return '<div class="bar"><div class="n">'+MONTHS[m.m]+'</div>'+
        '<div class="t"><div class="f" style="width:'+(m.income/maxM*100)+'%"></div></div>'+
@@ -1198,6 +1220,99 @@ function waBill(){
   var phone=(S.boot&&S.boot.driver&&S.boot.driver.phone)||'';
   var url='https://wa.me/'+phone+'?text='+encodeURIComponent(L.join('\n'));
   window.open(url,'_blank');
+}
+
+/* ================= 发票 Invoice ================= */
+var IV={ym:'',list:null};
+function ymNow(){ var d=new Date(); return String(d.getFullYear()).slice(2)+('0'+(d.getMonth()+1)).slice(-2) }
+function ymLabel(ym){ return '20'+ym.slice(0,2)+' 年 '+parseInt(ym.slice(2),10)+' 月' }
+function askInv(){
+  IV={ym:ymNow(),list:null};
+  drawInvPick();
+}
+function drawInvPick(){
+  var now=new Date(), opts=[];
+  for(var i=0;i<12;i++){
+    var d=new Date(now.getFullYear(),now.getMonth()-i,1);
+    opts.push(String(d.getFullYear()).slice(2)+('0'+(d.getMonth()+1)).slice(-2));
+  }
+  openSheet('<div style="font-family:var(--sf);font-size:25px;margin-bottom:3px">开发票</div>'+
+   '<div class="h1s" style="margin-bottom:18px">先选月份</div>'+
+   '<div class="chips">'+opts.map(function(y){
+     return '<button class="chip'+(IV.ym===y?' on':'')+'" onclick="loadInv(\''+y+'\')">'+ymLabel(y)+'</button>'}).join('')+'</div>'+
+   '<div style="height:14px"></div><button class="btn o" onclick="closeSheet()">取消</button>');
+}
+function loadInv(ym){
+  IV.ym=ym;
+  openSheet('<div class="load"><div class="spin"></div></div>'+
+    '<div style="text-align:center;color:var(--dim);font-size:14px">整理中…</div>');
+  call('listInvoiceMonth',[{ym:ym}]).then(function(r){
+    if(!r.ok){toast(r.msg,'bad');drawInvPick();return}
+    IV.list=r.list; drawInvList();
+  }).catch(function(e){toast(String(e.message||e),'bad');drawInvPick()});
+}
+function drawInvList(){
+  var L=IV.list||[];
+  var body=L.length?L.map(function(x){
+    return '<div class="sumrow" style="align-items:center">'+
+      '<span class="k" style="flex:1">'+
+        '<b style="color:var(--ink);font-size:14.5px">'+esc(x.billName)+'</b>'+
+        '<span style="opacity:.6;font-size:11.5px"> · '+(x.mode==='COMPANY'?'公司':'个人')+'</span>'+
+        '<br><span style="font-size:12px;opacity:.7">'+esc(x.branch)+' · '+x.n+' 笔 · RM '+rm(x.amount)+'</span>'+
+        (x.invNo?'<br><span style="font-size:11px;color:var(--ok)">已开 '+esc(x.invNo)+'</span>':'')+
+        (x.hasAddr?'':'<br><span style="font-size:11px;color:var(--warn)">⚠ 还没填地址</span>')+
+      '</span>'+
+      '<span style="display:flex;gap:6px">'+
+        '<button class="chip" onclick="editBill(\''+esc(x.salesman).replace(/'/g,"\\'")+'\')">资料</button>'+
+        '<button class="chip on" onclick="dlInv(\''+esc(x.key).replace(/'/g,"\\'")+'\')">PDF</button>'+
+      '</span></div>';
+  }).join(''):'<div class="hint">这个月没有订单</div>';
+
+  openSheet('<div style="font-family:var(--sf);font-size:25px;margin-bottom:3px">开发票</div>'+
+   '<div class="h1s" style="margin-bottom:16px">'+ymLabel(IV.ym)+' · '+L.length+' 个客户</div>'+
+   '<button class="btn o" onclick="drawInvPick()" style="margin-bottom:16px">换一个月</button>'+
+   body+
+   '<div style="height:14px"></div><button class="btn o" onclick="closeSheet()">关闭</button>');
+}
+function dlInv(key){
+  toast('产生中…','ok');
+  call('makeInvoicePdf',[{ym:IV.ym,key:key,by:(S.user||{}).name||''}]).then(function(r){
+    if(!r.ok){toast(r.msg,'bad');return}
+    var bin=atob(r.b64), arr=new Uint8Array(bin.length);
+    for(var i=0;i<bin.length;i++)arr[i]=bin.charCodeAt(i);
+    var url=URL.createObjectURL(new Blob([arr],{type:'application/pdf'}));
+    var a=document.createElement('a'); a.href=url; a.download=r.filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function(){URL.revokeObjectURL(url)},4000);
+    toast(r.invNo+' 已下载','ok');
+    loadInv(IV.ym);
+  }).catch(function(e){toast(String(e.message||e),'bad')});
+}
+function editBill(name){
+  call('getBillTo',[{salesman:name}]).then(function(r){
+    if(!r.ok){toast(r.msg,'bad');return}
+    openSheet('<div style="font-family:var(--sf);font-size:25px;margin-bottom:3px">发票资料</div>'+
+     '<div class="h1s" style="margin-bottom:18px">'+esc(name)+'</div>'+
+     '<label class="lbl">发票抬头（个人全名）</label>'+
+     '<input class="inp" id="bT" placeholder="例：Farid bin Ahmad" value="'+esc(r.title)+'" style="margin-bottom:12px">'+
+     '<label class="lbl">公司名（开给公司时用）</label>'+
+     '<input class="inp" id="bC" placeholder="例：PUNCAK MERAK SDN BHD" value="'+esc(r.company)+'" style="margin-bottom:12px">'+
+     '<label class="lbl">地址</label>'+
+     '<input class="inp" id="bA" placeholder="发票上印的地址" value="'+esc(r.addr)+'" style="margin-bottom:12px">'+
+     '<label class="lbl">电话</label>'+
+     '<input class="inp" id="bP" placeholder="选填" value="'+esc(r.tel)+'" style="margin-bottom:16px">'+
+     '<button class="btn p" onclick="saveBill(\''+esc(name).replace(/'/g,"\\'")+'\')">储存</button>'+
+     '<div style="height:9px"></div><button class="btn o" onclick="drawInvList()">返回</button>');
+  }).catch(function(e){toast(String(e.message||e),'bad')});
+}
+function saveBill(name){
+  call('saveBillTo',[{salesman:name,
+    title:document.getElementById('bT').value,company:document.getElementById('bC').value,
+    addr:document.getElementById('bA').value,tel:document.getElementById('bP').value}])
+  .then(function(r){
+    if(!r.ok){toast(r.msg,'bad');return}
+    toast('已储存','ok'); loadInv(IV.ym);
+  }).catch(function(e){toast(String(e.message||e),'bad')});
 }
 
 /* ================= 月报 Excel（持有人自己存档用） ================= */
@@ -1578,6 +1693,7 @@ function drawPrice(){
             '<b style="color:var(--ink);font-size:15px">RM '+x.price+'</b>'+
             '<span style="opacity:.65;font-size:12.5px"> · 利 RM '+x.profit+'</span>'+
             (x.desc?'<br><span style="font-size:12px;opacity:.75">'+esc(x.desc)+'</span>':'')+
+            (x.invName?'<br><span style="font-size:11px;opacity:.55">'+esc(x.invName)+'</span>':'')+
             (x.used?'<br><span style="font-size:11px;opacity:.5">用过 '+x.used+' 笔</span>':'')+
           '</span>'+
           '<span style="display:flex;gap:6px">'+
@@ -1613,13 +1729,17 @@ function priceEdit(setType,price){
    '<label class="lbl">给司机看的说明（选填）</label>'+
    '<input class="inp" id="pDS" placeholder="例：好的雨伞 / 普通雨伞" value="'+esc(cur?cur.desc:'')+'" style="margin-bottom:6px">'+
    '<div class="hint" style="margin-bottom:14px">这句会印在送货单上，让 TAN 一看就知道拿哪一款。</div>'+
+   '<label class="lbl">发票上的英文品名</label>'+
+   '<input class="inp" id="pIN" placeholder="留空会自动产生" value="'+esc(cur?cur.invName:'')+'" style="margin-bottom:6px">'+
+   '<div class="hint" style="margin-bottom:14px">发票会自动在前面加品牌，例如 PROTON。</div>'+
    '<button class="btn p" onclick="priceSave()">储存</button>'+
    '<div style="height:8px"></div><button class="btn o" onclick="askPrice()">返回</button>');
 }
 function priceSave(){
   var st=document.getElementById('pST').value, pr=document.getElementById('pPR').value,
       pf=document.getElementById('pPF').value, ds=document.getElementById('pDS').value;
-  call('saveSetPrice',[{setType:st,price:pr,profit:pf,desc:ds,by:(S.user||{}).name||''}]).then(function(r){
+  call('saveSetPrice',[{setType:st,price:pr,profit:pf,desc:ds,
+    invName:(document.getElementById('pIN')||{}).value||'',by:(S.user||{}).name||''}]).then(function(r){
     if(!r.ok){toast(r.msg,'bad');return}
     toast(r.updated?'已更新':'已新增','ok');
     S.boot=null;

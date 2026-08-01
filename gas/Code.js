@@ -554,7 +554,7 @@ function submitOrder(p) {
   if (!p.setType) return { ok: false, msg: '请选择 SET' };
   if (qty <= 0) return { ok: false, msg: '数量必须大于 0' };
 
-  var t = ensureCols_('ORDERS', ['DRV_COLOR', 'DRV_GRADE', 'DRV_NOTE']);
+  var t = ensureCols_('ORDERS', ['DRV_COLOR', 'DRV_GRADE', 'DRV_NOTE', 'INVOICE_TO']);
   var sheet = t.sheet, head = t.head;
 
   var total = (p.totalOverride !== '' && p.totalOverride != null)
@@ -588,6 +588,8 @@ function submitOrder(p) {
       DRV_COLOR: String(p.drvColor || '').trim(),
       DRV_GRADE: String(p.drvGrade || '').trim(),
       DRV_NOTE: String(p.drvNote || '').trim(),
+      // 发票开给销售员本人还是他的公司 —— 客户说两种都有
+      INVOICE_TO: up_(p.invoiceTo) === 'COMPANY' ? 'COMPANY' : 'SA',
       DELIVERY_STATUS: 'PENDING', NOTE: p.note || '',
       SOURCE: 'APP·' + (p.by || '')
     };
@@ -1557,7 +1559,7 @@ function renameSalesman(p) {
 
 /** 给维护介面看的完整价目表（含已停用的） */
 function listSetPrice() {
-  var t = ensureCols_('SET_PRICE', ['说明']);
+  var t = ensureCols_('SET_PRICE', ['说明', '英文品名']);
   var used = {};
   readTable_('ORDERS').rows.forEach(function (r) {
     if (isVoid_(r)) return;
@@ -1571,6 +1573,8 @@ function listSetPrice() {
     out.push({
       setType: st, price: pr, profit: toNum_(r.PROFIT_PER_SET),
       desc: String(r['说明'] || '').trim() || (DESC_FALLBACK_[up_(st) + '|' + pr] || ''),
+      invName: String(r['英文品名'] || '').trim() ||
+               invNameOf_(st, String(r['说明'] || '').trim() || (DESC_FALLBACK_[up_(st) + '|' + pr] || '')),
       active: up_(r.ACTIVE) !== 'NO',
       used: used[up_(st) + '|' + pr] || 0
     });
@@ -1619,7 +1623,7 @@ function saveSetPrice(p) {
   if (pf < 0) return { ok: false, msg: '每 set 利润不能是负的' };
   if (pf > pr) return { ok: false, msg: '利润比售价还高，请再确认' };
 
-  var t = ensureCols_('SET_PRICE', ['说明']);
+  var t = ensureCols_('SET_PRICE', ['说明', '英文品名']);
   var hit = null;
   t.rows.forEach(function (r) {
     if (up_(r.SET_TYPE) === st && toNum_(r.UNIT_PRICE) === pr) hit = r;
@@ -1627,18 +1631,22 @@ function saveSetPrice(p) {
 
   var cP = t.head.indexOf('PROFIT_PER_SET') + 1,
       cD = t.head.indexOf('说明') + 1,
+      cN = t.head.indexOf('英文品名') + 1,
       cA = t.head.indexOf('ACTIVE') + 1;
+  var inv = String((p && p.invName) || '').trim();
 
   var r = withLock_(function () {
     if (hit) {
       if (cP > 0) t.sheet.getRange(hit.__row, cP).setValue(pf);
       if (cD > 0 && desc) t.sheet.getRange(hit.__row, cD).setValue(desc);
+      if (cN > 0 && inv) t.sheet.getRange(hit.__row, cN).setValue(inv);
       if (cA > 0) t.sheet.getRange(hit.__row, cA).setValue('YES');
     } else {
       t.sheet.appendRow(t.head.map(function (h) {
         return h === 'SET_TYPE' ? st : h === 'UNIT_PRICE' ? pr
           : h === 'PROFIT_PER_SET' ? pf : h === '说明' ? desc
-            : h === 'ACTIVE' ? 'YES' : h === '历史笔数' ? 0 : '';
+            : h === '英文品名' ? (inv || invNameOf_(st, desc))
+              : h === 'ACTIVE' ? 'YES' : h === '历史笔数' ? 0 : '';
       }));
     }
     return { ok: true };
@@ -1734,6 +1742,386 @@ function RUN_MERGE_20260730() {
   var out = log.join('\n');
   Logger.log(out);
   return out;
+}
+
+/* ═════════════════════════════════════════════════════════
+ * 发票（Invoice）
+ * 客户第三轮回覆：一个月一张、每笔一行、全英文、不写收款状况、
+ * 抬头有时是销售员本人有时是公司、要印地址与银行户口。
+ * ═════════════════════════════════════════════════════════ */
+
+var VP_INFO_ = {
+  name: 'V & P TRADING',
+  ssm: '202403282822 (AS0486263-A)',
+  addr: '397, JLN LAMAN DELFINA 3/4, NILAI IMPIAN,\n71800 NILAI, NEGERI SEMBILAN.',
+  tel: '010-797 1699',
+  email: 'serom1699@gmail.com',
+  bank: 'HONG LEONG BANK',
+  bankName: 'V & P TRADING',
+  bankAcc: '33300265188'
+};
+
+/** 中文等级 → 发票上的英文等级 */
+function gradeEn_(desc) {
+  var d = String(desc || '');
+  if (d.indexOf('好') >= 0) return 'PREMIUM';
+  if (d.indexOf('普通') >= 0) return 'NORMAL';
+  return '';
+}
+
+/**
+ * 由 SET 名 + 中文说明推出发票上的英文品名（不含品牌）。
+ * 规则来自客户回传的样板：PROTON NORMAL GOODIES BAGS PACKAGE 10 ITEMS
+ *   有 ITEMS  → {等级} GOODIES BAGS PACKAGE (N ITEMS)
+ *   雨伞类    → {等级} UMBRELLA
+ * 颜色不进发票 —— 颜色不影响价钱，是给司机拿货用的，
+ * 同一样东西在帐上每次都该叫同一个名字。
+ */
+function invNameOf_(setType, desc) {
+  var st = up_(setType).trim(), g = gradeEn_(desc);
+  var m = st.match(/(\d+)\s*ITEMS/);
+  if (m) return (g ? g + ' ' : '') + 'GOODIES BAGS PACKAGE (' + m[1] + ' ITEMS)';
+  if (/UMBRELLA/.test(st)) {
+    var tail = /\+\s*BAG/.test(st) ? 'UMBRELLA + BAG' : 'UMBRELLA';
+    // SET 名字本身已经写了等级就不重复加（例如 PREMIUM UMBRELLA）
+    if (st.indexOf('PREMIUM') >= 0) return 'PREMIUM ' + tail;
+    return (g ? g + ' ' : '') + tail;
+  }
+  if (st === 'BAG' || st === 'BAGS') return 'BAG';
+  return st;   // 没见过的自己写，之後可在价目表手改
+}
+
+/** 价目表里那一栏（可手改）；没填就用规则推 */
+function invNameFor_(setType, price) {
+  var t = ensureCols_('SET_PRICE', ['说明', '英文品名']);
+  var hit = null;
+  t.rows.forEach(function (r) {
+    if (up_(r.SET_TYPE) === up_(setType) && toNum_(r.UNIT_PRICE) === toNum_(price)) hit = r;
+  });
+  var manual = hit ? String(hit['英文品名'] || '').trim() : '';
+  if (manual) return manual;
+  var desc = hit ? String(hit['说明'] || '').trim() : '';
+  if (!desc) desc = DESC_FALLBACK_[up_(setType) + '|' + toNum_(price)] || '';
+  return invNameOf_(setType, desc);
+}
+
+/** 把价目表里空白的「英文品名」一次填好（可重复跑） */
+function fillInvNames() {
+  var t = ensureCols_('SET_PRICE', ['说明', '英文品名']);
+  var c = t.head.indexOf('英文品名') + 1;
+  if (c <= 0) return { ok: false, msg: 'SET_PRICE 缺少「英文品名」栏' };
+  var n = 0;
+  t.rows.forEach(function (r) {
+    if (!r.SET_TYPE) return;
+    if (String(r['英文品名'] || '').trim()) return;
+    var desc = String(r['说明'] || '').trim() ||
+               (DESC_FALLBACK_[up_(r.SET_TYPE) + '|' + toNum_(r.UNIT_PRICE)] || '');
+    t.sheet.getRange(r.__row, c).setValue(invNameOf_(r.SET_TYPE, desc));
+    n++;
+  });
+  clearBootCache_();
+  return { ok: true, filled: n };
+}
+
+/** 一个客户 = 销售员 ＋ 开给谁（本人 / 公司）。同月同客户 = 一张发票。 */
+function custKey_(o) {
+  return up_(o.SALESMAN) + '|' + (up_(o.INVOICE_TO) === 'COMPANY' ? 'COMPANY' : 'SA');
+}
+
+/** 销售员那几栏发票资料 */
+function billTo_(salesman, mode) {
+  var t = ensureCols_('SALESMAN', ['发票抬头', '公司名', '地址', '电话']);
+  var hit = null;
+  t.rows.forEach(function (r) { if (!hit && up_(r.SALESMAN) === up_(salesman)) hit = r; });
+  var company = hit ? String(hit['公司名'] || '').trim() : '';
+  var title = hit ? String(hit['发票抬头'] || '').trim() : '';
+  return {
+    name: (mode === 'COMPANY' ? (company || title) : (title || String(salesman))) || String(salesman),
+    company: mode === 'COMPANY' ? '' : company,
+    addr: hit ? String(hit['地址'] || '').trim() : '',
+    tel: hit ? String(hit['电话'] || '').trim() : '',
+    branch: hit ? String(hit.BRANCH || '').trim() : ''
+  };
+}
+
+/** 发票号码：INV-YYMM-NNN，存在 INVOICE 分页，重印不变 */
+function invSheet_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName('INVOICE');
+  var head = ['INV_NO', 'YM', 'CUST_KEY', 'SALESMAN', 'BILL_MODE', 'BILL_NAME',
+              'ORDERS', 'AMOUNT', 'ISSUED_AT', 'ISSUED_BY'];
+  if (!sh) {
+    sh = ss.insertSheet('INVOICE');
+    sh.getRange(1, 1, 1, head.length)
+      .setValues([['● 已开出的发票号码（只进不出）。重印同一张，号码不变。', '', '', '', '', '', '', '', '', '']]);
+    sh.getRange(2, 1, 1, head.length).setValues([head]).setFontWeight('bold');
+    sh.setFrozenRows(2);
+  }
+  return readTable_('INVOICE');
+}
+
+function invNoFor_(ym, key, meta) {
+  var t = invSheet_();
+  var hit = null;
+  t.rows.forEach(function (r) {
+    if (String(r.YM) === String(ym) && up_(r.CUST_KEY) === up_(key)) hit = r;
+  });
+  if (hit) return { no: String(hit.INV_NO), isNew: false, row: hit.__row };
+
+  var max = 0;
+  t.rows.forEach(function (r) {
+    if (String(r.YM) !== String(ym)) return;
+    var m = String(r.INV_NO || '').match(/-(\d+)$/);
+    if (m) max = Math.max(max, parseInt(m[1], 10));
+  });
+  var no = 'INV-' + ym + '-' + String(max + 1).padStart(3, '0');
+  t.sheet.appendRow(t.head.map(function (h) {
+    return h === 'INV_NO' ? no : h === 'YM' ? ym : h === 'CUST_KEY' ? key
+      : h === 'SALESMAN' ? (meta.salesman || '') : h === 'BILL_MODE' ? (meta.mode || '')
+        : h === 'BILL_NAME' ? (meta.billName || '') : h === 'ORDERS' ? (meta.n || 0)
+          : h === 'AMOUNT' ? (meta.amount || 0)
+            : h === 'ISSUED_AT' ? Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd HH:mm')
+              : h === 'ISSUED_BY' ? (meta.by || '') : '';
+  }));
+  return { no: no, isNew: true };
+}
+
+/** 某个月有哪些客户可以开发票 */
+function listInvoiceMonth(p) {
+  var ym = String((p && p.ym) || '').trim();          // 例 '2607'
+  if (!/^\d{4}$/.test(ym)) return { ok: false, msg: '请选月份' };
+  var yy = '20' + ym.slice(0, 2), mm = parseInt(ym.slice(2), 10);
+
+  var t = ensureCols_('ORDERS', ['INVOICE_TO']);
+  var g = {};
+  t.rows.forEach(function (r) {
+    if (isVoid_(r)) return;
+    var d = String(r.DATE || '');
+    if (d.slice(0, 4) !== yy || parseInt(String(r.MONTH), 10) !== mm) return;
+    var mode = up_(r.INVOICE_TO) === 'COMPANY' ? 'COMPANY' : 'SA';
+    var key = custKey_(r);
+    if (!g[key]) {
+      var b = billTo_(r.SALESMAN, mode);
+      g[key] = { key: key, salesman: String(r.SALESMAN || ''), mode: mode,
+                 billName: b.name, branch: b.branch || String(r.BRANCH || ''),
+                 hasAddr: !!b.addr, n: 0, amount: 0 };
+    }
+    g[key].n++; g[key].amount += toNum_(r.TOTAL_INCOME);
+  });
+
+  var issued = {};
+  invSheet_().rows.forEach(function (r) {
+    if (String(r.YM) === ym) issued[up_(r.CUST_KEY)] = String(r.INV_NO);
+  });
+
+  var list = Object.keys(g).map(function (k) {
+    g[k].amount = Math.round(g[k].amount * 100) / 100;
+    g[k].invNo = issued[up_(k)] || '';
+    return g[k];
+  }).sort(function (a, b) { return b.amount - a.amount; });
+
+  return { ok: true, ym: ym, list: list };
+}
+
+/** 组一张发票的完整资料（不配号码，纯预览用 preview=true） */
+function getInvoice(p) {
+  var ym = String((p && p.ym) || '').trim();
+  var key = String((p && p.key) || '').trim();
+  if (!/^\d{4}$/.test(ym) || !key) return { ok: false, msg: '参数不对' };
+  var yy = '20' + ym.slice(0, 2), mm = parseInt(ym.slice(2), 10);
+  var mode = key.split('|')[1] === 'COMPANY' ? 'COMPANY' : 'SA';
+  var salesman = key.split('|')[0];
+
+  var t = ensureCols_('ORDERS', ['INVOICE_TO']);
+  var lines = [], sub = 0, qty = 0, gross = 0;
+  t.rows.forEach(function (r) {
+    if (isVoid_(r) || custKey_(r) !== key) return;
+    var d = String(r.DATE || '');
+    if (d.slice(0, 4) !== yy || parseInt(String(r.MONTH), 10) !== mm) return;
+    var q = toNum_(r.QTY), pr = toNum_(r.UNIT_PRICE), tot = toNum_(r.TOTAL_INCOME);
+    var brand = String(r.BRAND || '').trim();
+    var nm = invNameFor_(r.SET_TYPE, pr);
+    lines.push({
+      date: shortDate_(d),
+      desc: (brand && brand !== 'OTHER' ? brand + ' ' : '') + nm,
+      qty: q, unit: unitOf_(r.SET_TYPE), price: pr,
+      amount: Math.round(q * pr * 100) / 100,
+      total: tot
+    });
+    qty += q; gross += q * pr; sub += tot;
+  });
+  if (!lines.length) return { ok: false, msg: '这个月这位客户没有订单' };
+
+  lines.sort(function (a, b) { return a.date < b.date ? -1 : 1; });
+  gross = Math.round(gross * 100) / 100;
+  sub = Math.round(sub * 100) / 100;
+  var disc = Math.round((gross - sub) * 100) / 100;
+
+  var b = billTo_(salesman, mode);
+  return {
+    ok: true, ym: ym, key: key, mode: mode, salesman: salesman,
+    billTo: b, lines: lines, qty: qty,
+    gross: gross, discount: disc, total: sub,
+    company: VP_INFO_,
+    dateStr: shortDate_(Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd'))
+  };
+}
+
+function esc_(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function money_(n) {
+  var v = Math.round(toNum_(n) * 100) / 100;
+  var s = v.toFixed(2), p = s.split('.');
+  return p[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',') + '.' + p[1];
+}
+
+/**
+ * 发票 HTML。刻意用表格与 inline style —— Apps Script 转 PDF 用的是
+ * 旧版渲染器，不支援 flex / grid，但表格排版它处理得很好。
+ */
+function invoiceHtml_(iv, invNo) {
+  var C = iv.company, b = iv.billTo;
+  var rows = iv.lines.map(function (l, i) {
+    return '<tr>'
+      + '<td style="padding:6px 4px;border-bottom:1px solid #e4e2dd;font-size:10pt">' + (i + 1) + '.</td>'
+      + '<td style="padding:6px 4px;border-bottom:1px solid #e4e2dd;font-size:10pt">' + esc_(l.date) + '</td>'
+      + '<td style="padding:6px 4px;border-bottom:1px solid #e4e2dd;font-size:10pt">' + esc_(l.desc) + '</td>'
+      + '<td align="right" style="padding:6px 4px;border-bottom:1px solid #e4e2dd;font-size:10pt">' + l.qty + ' ' + l.unit + '</td>'
+      + '<td align="right" style="padding:6px 4px;border-bottom:1px solid #e4e2dd;font-size:10pt">' + money_(l.price) + '</td>'
+      + '<td align="right" style="padding:6px 4px;border-bottom:1px solid #e4e2dd;font-size:10pt">' + money_(l.amount) + '</td>'
+      + '</tr>';
+  }).join('');
+
+  var totRow = function (label, val, bold) {
+    return '<tr>'
+      + '<td align="right" style="padding:4px 8px;font-size:' + (bold ? '12pt' : '10pt') + ';'
+      + (bold ? 'font-weight:bold;border-top:1.5px solid #333;' : '') + '">' + esc_(label) + '</td>'
+      + '<td align="right" style="padding:4px 4px;font-size:' + (bold ? '12pt' : '10pt') + ';width:110px;'
+      + (bold ? 'font-weight:bold;border-top:1.5px solid #333;' : '') + '">' + val + '</td>'
+      + '</tr>';
+  };
+
+  return '<html><head><meta charset="utf-8"></head>'
+    + '<body style="font-family:Arial,Helvetica,sans-serif;color:#1c1c1e;margin:0;padding:26px 30px">'
+
+    /* ── 抬头 ── */
+    + '<div style="text-align:center;margin-bottom:6px">'
+    + '<div style="font-size:20pt;font-weight:bold;letter-spacing:2px">' + esc_(C.name) + '</div>'
+    + '<div style="font-size:8.5pt;color:#555;margin-top:3px">' + esc_(C.ssm) + '</div>'
+    + '<div style="font-size:9pt;color:#333;margin-top:4px">' + esc_(C.addr).replace(/\n/g, '<br>') + '</div>'
+    + '<div style="font-size:9pt;color:#333;margin-top:2px">Tel: ' + esc_(C.tel) + ' &nbsp;·&nbsp; ' + esc_(C.email) + '</div>'
+    + '</div>'
+    + '<hr style="border:none;border-top:2px solid #1c1c1e;margin:12px 0 14px">'
+
+    /* ── 客户 ＋ 发票资讯 ── */
+    + '<table width="100%" cellpadding="0" cellspacing="0"><tr>'
+    + '<td valign="top" width="58%">'
+    + '<div style="font-size:8.5pt;color:#777;text-decoration:underline;margin-bottom:4px">Customer Details</div>'
+    + '<div style="font-size:11pt;font-weight:bold">' + esc_(b.name) + '</div>'
+    + (b.company ? '<div style="font-size:10pt">' + esc_(b.company) + '</div>' : '')
+    + (b.branch ? '<div style="font-size:9.5pt;color:#555">' + esc_(b.branch) + '</div>' : '')
+    + (b.addr ? '<div style="font-size:9.5pt;color:#333;margin-top:3px">' + esc_(b.addr).replace(/\n/g, '<br>') + '</div>' : '')
+    + (b.tel ? '<div style="font-size:9.5pt;color:#333">Tel: ' + esc_(b.tel) + '</div>' : '')
+    + '</td>'
+    + '<td valign="top" width="42%">'
+    + '<div style="font-size:17pt;font-weight:bold;letter-spacing:1px;margin-bottom:8px">INVOICE</div>'
+    + '<table cellpadding="0" cellspacing="0" style="font-size:9.5pt">'
+    + '<tr><td style="color:#777;padding-right:8px">Invoice No</td><td style="font-weight:bold">' + esc_(invNo) + '</td></tr>'
+    + '<tr><td style="color:#777;padding-right:8px">Date</td><td>' + esc_(iv.dateStr) + '</td></tr>'
+    + '</table></td></tr></table>'
+
+    /* ── 明细 ── */
+    + '<table width="100%" cellpadding="0" cellspacing="0" style="margin-top:16px">'
+    + '<tr style="background:#f4f2ec">'
+    + '<th align="left" style="padding:7px 4px;font-size:9pt;width:26px">#</th>'
+    + '<th align="left" style="padding:7px 4px;font-size:9pt;width:76px">Date</th>'
+    + '<th align="left" style="padding:7px 4px;font-size:9pt">Description</th>'
+    + '<th align="right" style="padding:7px 4px;font-size:9pt;width:64px">Qty</th>'
+    + '<th align="right" style="padding:7px 4px;font-size:9pt;width:66px">Price</th>'
+    + '<th align="right" style="padding:7px 4px;font-size:9pt;width:82px">Amount</th>'
+    + '</tr>' + rows + '</table>'
+
+    /* ── 合计 ── */
+    + '<table width="100%" cellpadding="0" cellspacing="0" style="margin-top:10px"><tr>'
+    + '<td width="55%" valign="top">'
+    + '<div style="font-size:9pt;color:#555">Total Qty: <b>' + iv.qty + '</b></div>'
+    + '</td><td width="45%">'
+    + '<table width="100%" cellpadding="0" cellspacing="0">'
+    + totRow('Sub-Total (RM)', money_(iv.gross))
+    + (iv.discount > 0.005 ? totRow('Discount (RM)', '-' + money_(iv.discount)) : '')
+    + totRow('Grand Total (RM)', money_(iv.total), true)
+    + '</table></td></tr></table>'
+
+    /* ── 银行 ＋ 结尾 ── */
+    + '<div style="margin-top:26px;padding-top:10px;border-top:1px solid #d8d6d0">'
+    + '<div style="font-size:8.5pt;color:#777;margin-bottom:3px">BANK DETAIL</div>'
+    + '<div style="font-size:10pt">' + esc_(C.bank) + ' &nbsp;·&nbsp; ' + esc_(C.bankName) + ' &nbsp;·&nbsp; <b>' + esc_(C.bankAcc) + '</b></div>'
+    + '</div>'
+    + '<div style="text-align:center;margin-top:28px;font-size:10pt;color:#555">Thank you for your business.</div>'
+    + '</body></html>';
+}
+
+/** 产生发票 PDF，回传 base64 让前端下载。会配一个号码并记下来。 */
+function makeInvoicePdf(p) {
+  var iv = getInvoice(p);
+  if (!iv.ok) return iv;
+
+  var r = withLock_(function () {
+    return { ok: true, inv: invNoFor_(iv.ym, iv.key, {
+      salesman: iv.salesman, mode: iv.mode, billName: iv.billTo.name,
+      n: iv.lines.length, amount: iv.total, by: (p && p.by) || ''
+    }) };
+  });
+  if (!r.ok) return r;
+
+  var invNo = r.inv.no;
+  try {
+    var html = invoiceHtml_(iv, invNo);
+    var pdf = Utilities.newBlob(html, MimeType.HTML, invNo + '.html').getAs(MimeType.PDF);
+    return {
+      ok: true, invNo: invNo, isNew: r.inv.isNew,
+      filename: invNo + ' ' + iv.billTo.name.replace(/[\\/:*?"<>|]/g, '') + '.pdf',
+      b64: Utilities.base64Encode(pdf.getBytes()),
+      total: iv.total, lines: iv.lines.length
+    };
+  } catch (e) {
+    return { ok: false, msg: '产生 PDF 失败：' + friendlyErr_(e), invNo: invNo };
+  }
+}
+
+/** 填销售员的发票资料（抬头 / 公司 / 地址 / 电话） */
+function saveBillTo(p) {
+  var name = normName_(p && p.salesman);
+  if (!name) return { ok: false, msg: '请选销售员' };
+  var t = ensureCols_('SALESMAN', ['发票抬头', '公司名', '地址', '电话']);
+  var rows = t.rows.filter(function (r) { return normName_(r.SALESMAN) === name; });
+  if (!rows.length) return { ok: false, msg: '名单里没有这个人' };
+
+  var map = { '发票抬头': (p.title || '').trim(), '公司名': (p.company || '').trim(),
+              '地址': (p.addr || '').trim(), '电话': (p.tel || '').trim() };
+  var res = withLock_(function () {
+    Object.keys(map).forEach(function (k) {
+      var c = t.head.indexOf(k) + 1;
+      if (c > 0) rows.forEach(function (r) { t.sheet.getRange(r.__row, c).setValue(map[k]); });
+    });
+    return { ok: true };
+  });
+  if (!res.ok) return res;
+  clearBootCache_();
+  return { ok: true, salesman: name };
+}
+
+function getBillTo(p) {
+  var name = normName_(p && p.salesman);
+  var t = ensureCols_('SALESMAN', ['发票抬头', '公司名', '地址', '电话']);
+  var hit = null;
+  t.rows.forEach(function (r) { if (!hit && normName_(r.SALESMAN) === name) hit = r; });
+  if (!hit) return { ok: false, msg: '名单里没有这个人' };
+  return { ok: true, salesman: name,
+    title: String(hit['发票抬头'] || ''), company: String(hit['公司名'] || ''),
+    addr: String(hit['地址'] || ''), tel: String(hit['电话'] || '') };
 }
 
 /*******************************************************
@@ -2010,7 +2398,7 @@ var SET_DESC_ = {
 
 var ORDER_HEAD = ['ORDER_ID', 'DATE', 'MONTH', 'REGION', 'STATE', 'BRANCH', 'BRAND', 'SALESMAN',
   'SET_TYPE', 'UNIT_PRICE', 'QTY', 'TOTAL_INCOME', 'MY_INCOME', 'DRIVER_FEE',
-  'PAY_STATUS', 'PAY_DATE', 'DRV_COLOR', 'DRV_GRADE', 'DRV_NOTE',
+  'PAY_STATUS', 'PAY_DATE', 'DRV_COLOR', 'DRV_GRADE', 'DRV_NOTE', 'INVOICE_TO',
   'DELIVERY_STATUS', 'NOTE', 'SOURCE',
   'STATUS', 'VOID_BY', 'VOID_AT'];
 
