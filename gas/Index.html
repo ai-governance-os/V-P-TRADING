@@ -1281,10 +1281,12 @@ function drawInvList(){
         '<span style="opacity:.6;font-size:11.5px"> · '+(x.mode==='COMPANY'?'公司':'个人')+'</span>'+
         '<br><span style="font-size:12px;opacity:.7">'+esc(x.branch)+' · '+x.n+' 笔 · RM '+rm(x.amount)+'</span>'+
         (x.invNo?'<br><span style="font-size:11px;color:var(--ok)">已开 '+esc(x.invNo)+'</span>':'')+
+        (x.voided?'<br><span style="font-size:11px;opacity:.5">已作废 '+x.voided+' 张</span>':'')+
         (x.hasAddr?'':'<br><span style="font-size:11px;color:var(--warn)">⚠ 还没填地址</span>')+
       '</span>'+
-      '<span style="display:flex;gap:6px">'+
+      '<span style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">'+
         '<button class="chip" onclick="editBill(\''+esc(x.salesman).replace(/'/g,"\\'")+'\')">资料</button>'+
+        (x.invNo?'<button class="chip" onclick="askVoidInv(\''+esc(x.invNo).replace(/'/g,"\\'")+'\')">作废</button>':'')+
         '<button class="chip on" onclick="dlInv(\''+esc(x.key).replace(/'/g,"\\'")+'\')">PDF</button>'+
       '</span></div>';
   }).join(''):'<div class="hint">这个月没有订单</div>';
@@ -1312,6 +1314,28 @@ function dlInv(key){
     setTimeout(function(){URL.revokeObjectURL(url)},4000);
     toast(r.invNo+' 已下载','ok');
     loadInv(IV.ym);
+  }).catch(function(e){toast(String(e.message||e),'bad')});
+}
+/* 作废发票号码 —— 不删除，保留号码并标记，帐上的序号才不会断 */
+function askVoidInv(no){
+  openSheet('<div style="font-family:var(--sf);font-size:25px;margin-bottom:3px">作废发票</div>'+
+   '<div class="h1s" style="margin-bottom:18px">'+esc(no)+'</div>'+
+   '<div class="card" style="padding:14px 15px;margin-bottom:14px">'+
+     '<div style="font-size:13.5px;color:var(--dim);line-height:1.75">'+
+       '号码<b style="color:var(--ink)">不会删除</b>，只会标记成「已作废」。<br>'+
+       '查帐的人看到 001 作废、002 正常是合理的；看到 001 凭空不见会问。<br><br>'+
+       '作废之後，这个客户这个月可以重新开一张，会拿到<b style="color:var(--ink)">新的号码</b>。</div>'+
+   '</div>'+
+   '<label class="lbl">作废原因</label>'+
+   '<input class="inp" id="vRsn" placeholder="例：开错客户 / 测试用" style="margin-bottom:16px">'+
+   '<button class="btn p" onclick="doVoidInv(\''+esc(no).replace(/'/g,"\\'")+'\')">确定作废</button>'+
+   '<div style="height:9px"></div><button class="btn o" onclick="drawInvList()">取消</button>');
+}
+function doVoidInv(no){
+  var rsn=(document.getElementById('vRsn')||{}).value||'';
+  call('voidInvoice',[{invNo:no,reason:rsn,by:(S.user||{}).name||''}]).then(function(r){
+    if(!r.ok){toast(r.msg,'bad');return}
+    toast(no+' 已作废','ok'); loadInv(IV.ym);
   }).catch(function(e){toast(String(e.message||e),'bad')});
 }
 function editBill(name){

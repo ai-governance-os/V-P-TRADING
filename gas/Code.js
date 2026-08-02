@@ -1893,25 +1893,32 @@ function invSheet_() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sh = ss.getSheetByName('INVOICE');
   var head = ['INV_NO', 'YM', 'CUST_KEY', 'SALESMAN', 'BILL_MODE', 'BILL_NAME',
-              'ORDERS', 'AMOUNT', 'ISSUED_AT', 'ISSUED_BY'];
+              'ORDERS', 'AMOUNT', 'ISSUED_AT', 'ISSUED_BY',
+              'STATUS', 'VOID_AT', 'VOID_BY', 'VOID_REASON'];
   if (!sh) {
     sh = ss.insertSheet('INVOICE');
     sh.getRange(1, 1, 1, head.length)
-      .setValues([['● 已开出的发票号码（只进不出）。重印同一张，号码不变。', '', '', '', '', '', '', '', '', '']]);
+      .setValues([['● 已开出的发票号码。重印同一张，号码不变。'
+        + '开错了用「作废」—— 号码保留、标记作废，不要删除，帐上的序号才不会断。',
+        '', '', '', '', '', '', '', '', '', '', '', '', '']]);
     sh.getRange(2, 1, 1, head.length).setValues([head]).setFontWeight('bold');
     sh.setFrozenRows(2);
   }
-  return readTable_('INVOICE');
+  return ensureCols_('INVOICE', ['STATUS', 'VOID_AT', 'VOID_BY', 'VOID_REASON']);
 }
+function invVoided_(r) { return up_(r.STATUS) === 'VOID'; }
 
 function invNoFor_(ym, key, meta) {
   var t = invSheet_();
   var hit = null;
   t.rows.forEach(function (r) {
+    // 作废掉的不算 —— 同一个客户同一个月可以重开，但会拿到新号码
+    if (invVoided_(r)) return;
     if (String(r.YM) === String(ym) && up_(r.CUST_KEY) === up_(key)) hit = r;
   });
   if (hit) return { no: String(hit.INV_NO), isNew: false, row: hit.__row };
 
+  // 找最大号时「连作废的一起算」，号码才永远不会重复使用
   var max = 0;
   t.rows.forEach(function (r) {
     if (String(r.YM) !== String(ym)) return;
@@ -1967,14 +1974,17 @@ function listInvoiceMonth(p) {
   });
 
   var need = Object.keys(needMap).sort();
-  var issued = {};
+  var issued = {}, voided = {};
   invSheet_().rows.forEach(function (r) {
-    if (String(r.YM) === ym) issued[up_(r.CUST_KEY)] = String(r.INV_NO);
+    if (String(r.YM) !== ym) return;
+    if (invVoided_(r)) { voided[up_(r.CUST_KEY)] = (voided[up_(r.CUST_KEY)] || 0) + 1; return; }
+    issued[up_(r.CUST_KEY)] = String(r.INV_NO);
   });
 
   var list = Object.keys(g).map(function (k) {
     g[k].amount = Math.round(g[k].amount * 100) / 100;
     g[k].invNo = issued[up_(k)] || '';
+    g[k].voided = voided[up_(k)] || 0;
     return g[k];
   }).sort(function (a, b) { return b.amount - a.amount; });
 
@@ -2191,6 +2201,43 @@ function getBillTo(p) {
   return { ok: true, salesman: name,
     title: String(hit['发票抬头'] || ''), company: String(hit['公司名'] || ''),
     addr: String(hit['地址'] || ''), tel: String(hit['电话'] || '') };
+}
+
+/**
+ * 作废一张发票号码。
+ * 不删除 —— 号码留在纪录里标记作废，序号才不会断。
+ * 查帐的人看到 001 作废、002 正常，是合理的；看到 001 凭空不见，会问。
+ */
+function voidInvoice(p) {
+  var no = String((p && p.invNo) || '').trim();
+  var reason = String((p && p.reason) || '').trim();
+  if (!no) return { ok: false, msg: '请选一张发票' };
+  if (reason.length < 2) return { ok: false, msg: '请写一句作废原因（查帐时要看的）' };
+
+  var t = invSheet_();
+  var hit = null;
+  t.rows.forEach(function (r) { if (up_(r.INV_NO) === up_(no)) hit = r; });
+  if (!hit) return { ok: false, msg: '找不到这张发票' };
+  if (invVoided_(hit)) return { ok: false, msg: '这张已经作废过了' };
+
+  var cS = t.head.indexOf('STATUS') + 1,
+      cA = t.head.indexOf('VOID_AT') + 1,
+      cB = t.head.indexOf('VOID_BY') + 1,
+      cR = t.head.indexOf('VOID_REASON') + 1;
+  if (cS <= 0) return { ok: false, msg: 'INVOICE 表缺少 STATUS 栏' };
+
+  var r = withLock_(function () {
+    t.sheet.getRange(hit.__row, cS).setValue('VOID');
+    if (cA > 0) t.sheet.getRange(hit.__row, cA).setValue(Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd HH:mm'));
+    if (cB > 0) t.sheet.getRange(hit.__row, cB).setValue((p && p.by) || '');
+    if (cR > 0) t.sheet.getRange(hit.__row, cR).setValue(reason);
+    return { ok: true };
+  });
+  if (!r.ok) return r;
+
+  logChange_({ kind: '发票', action: '作废', from: no, to: reason,
+               by: (p && p.by) || '' });
+  return { ok: true, invNo: no };
 }
 
 /*******************************************************
