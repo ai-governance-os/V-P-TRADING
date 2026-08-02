@@ -479,6 +479,7 @@ function buildBoot_() {
     defaultPay: cfg.DEFAULT_PAY_STATUS || 'OP',
     driver: { name: String(drv.DRIVER_NAME || ''), phone: String(drv.PHONE || '').replace(/[^0-9]/g, ''), allowance: toNum_(drv.ALLOWANCE_PER_MONTH) },
     build: (typeof BUILD_ID === 'string' ? BUILD_ID : ''),
+    brands: invBrandList_().slice().sort(),
     setTypes: setTypes,
     people: people,
     branches: branches
@@ -555,7 +556,7 @@ function submitOrder(p) {
   if (!p.setType) return { ok: false, msg: '请选择 SET' };
   if (qty <= 0) return { ok: false, msg: '数量必须大于 0' };
 
-  var t = ensureCols_('ORDERS', ['DRV_COLOR', 'DRV_GRADE', 'DRV_NOTE', 'INVOICE_TO']);
+  var t = ensureCols_('ORDERS', ['DRV_COLOR', 'DRV_GRADE', 'DRV_NOTE', 'INVOICE_TO', 'INV_BRAND']);
   var sheet = t.sheet, head = t.head;
 
   var total = (p.totalOverride !== '' && p.totalOverride != null)
@@ -591,6 +592,8 @@ function submitOrder(p) {
       DRV_NOTE: String(p.drvNote || '').trim(),
       // 发票开给销售员本人还是他的公司 —— 客户说两种都有
       INVOICE_TO: up_(p.invoiceTo) === 'COMPANY' ? 'COMPANY' : 'SA',
+      // 发票上印哪个牌子。留空 = 跟分行一样
+      INV_BRAND: up_(p.invBrand || ''),
       DELIVERY_STATUS: 'PENDING', NOTE: p.note || '',
       SOURCE: 'APP·' + (p.by || '')
     };
@@ -756,7 +759,7 @@ function unvoidOrder(id) {
 }
 
 function updateOrder(p) {
-  var t = readTable_('ORDERS');
+  var t = ensureCols_('ORDERS', ['INV_BRAND']);
   var hit = findOrder_(t, p.id);
   if (!hit) return { ok: false, msg: '找不到订单' };
   var qty = toNum_(p.qty), price = toNum_(p.price);
@@ -783,6 +786,7 @@ function updateOrder(p) {
   };
   if (p.payStatus) patch.PAY_STATUS = p.payStatus;
   if (p.note != null) patch.NOTE = p.note;
+  if (p.invBrand != null) patch.INV_BRAND = up_(p.invBrand);
 
   var r = withLock_(function () {
     return patchRow_(t.sheet, t.head, hit.__row, hit.ORDER_ID, patch);
@@ -1852,6 +1856,9 @@ function invBrandList_() {
   return Object.keys(out).sort(function (a, b) { return b.length - a.length; });
 }
 function invBrandOf_(r, list) {
+  // 下单时直接选的最优先；其次是备注里写的（旧资料都是这样）；最後才是分行的品牌
+  var picked = up_(r.INV_BRAND || '');
+  if (picked) return picked;
   var note = up_(r.NOTE || '');
   list = list || invBrandList_();
   for (var i = 0; i < list.length; i++) {
@@ -1943,7 +1950,7 @@ function listInvoiceMonth(p) {
   if (!/^\d{4}$/.test(ym)) return { ok: false, msg: '请选月份' };
   var yy = '20' + ym.slice(0, 2), mm = parseInt(ym.slice(2), 10);
 
-  var t = ensureCols_('ORDERS', ['INVOICE_TO']);
+  var t = ensureCols_('ORDERS', ['INVOICE_TO', 'INV_BRAND']);
   var sp = ensureCols_('SET_PRICE', ['说明', '英文品名']);
   var smT = ensureCols_('SALESMAN', ['发票抬头', '公司名', '地址', '电话']);   // 只读一次
   var graded = {};
@@ -2000,7 +2007,7 @@ function getInvoice(p) {
   var mode = key.split('|')[1] === 'COMPANY' ? 'COMPANY' : 'SA';
   var salesman = key.split('|')[0];
 
-  var t = ensureCols_('ORDERS', ['INVOICE_TO']);
+  var t = ensureCols_('ORDERS', ['INVOICE_TO', 'INV_BRAND']);
   var spT = ensureCols_('SET_PRICE', ['说明', '英文品名']);                    // 只读一次
   var brandList = invBrandList_();                                            // 只算一次
   var smT = ensureCols_('SALESMAN', ['发票抬头', '公司名', '地址', '电话']);   // 只读一次
@@ -2514,7 +2521,7 @@ var SET_DESC_ = {
 
 var ORDER_HEAD = ['ORDER_ID', 'DATE', 'MONTH', 'REGION', 'STATE', 'BRANCH', 'BRAND', 'SALESMAN',
   'SET_TYPE', 'UNIT_PRICE', 'QTY', 'TOTAL_INCOME', 'MY_INCOME', 'DRIVER_FEE',
-  'PAY_STATUS', 'PAY_DATE', 'DRV_COLOR', 'DRV_GRADE', 'DRV_NOTE', 'INVOICE_TO',
+  'PAY_STATUS', 'PAY_DATE', 'DRV_COLOR', 'DRV_GRADE', 'DRV_NOTE', 'INVOICE_TO', 'INV_BRAND',
   'DELIVERY_STATUS', 'NOTE', 'SOURCE',
   'STATUS', 'VOID_BY', 'VOID_AT'];
 

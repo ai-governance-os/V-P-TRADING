@@ -238,7 +238,7 @@ select.inp{appearance:none;background-image:linear-gradient(45deg,transparent 50
 <div class="toast" id="toast"></div>
 
 <!-- sheet -->
-<div class="sheet" id="sheet"><div class="bd" onclick="closeSheet()"></div>
+<div class="sheet" id="sheet"><div class="bd" onclick="bdClose()"></div>
   <div class="pn"><div class="grab"></div><div id="sheetBody"></div></div></div>
 
 <script>
@@ -250,7 +250,7 @@ var F={ // 表单
   salesman:'',branch:'',brand:'',state:'',region:'',setType:'',price:0,profit:0,qty:1,
   paid:false,payMethod:'OP',payDate:'',payNote:'',
   drvColor:'',drvGrade:'',drvNote:'',drvDesc:'',
-  note:'',ovTotal:'',ovMine:'',ovFee:'',invoiceTo:'SA'
+  note:'',ovTotal:'',ovMine:'',ovFee:'',invoiceTo:'SA',invBrand:''
 };
 /** 记住上次选的颜色，同一间分行多半一样 */
 function rememberDrv(){ try{ if(F.drvColor) LASTCOLOR=F.drvColor }catch(e){} }
@@ -300,6 +300,23 @@ function toast(m,t){var e=document.getElementById('toast');
 }
 function openSheet(h){hideToast();document.getElementById('sheetBody').innerHTML=h;
   document.getElementById('sheet').className='sheet on'}
+/** 弹窗里有没有正在填的东西 */
+function sheetDirty(){
+  var b=document.getElementById('sheetBody'); if(!b)return false;
+  var el=b.querySelectorAll('input,textarea');
+  for(var i=0;i<el.length;i++){
+    if(document.activeElement===el[i])return true;      // 正在打字
+    if(String(el[i].value||'').trim())return true;       // 已经填了东西
+  }
+  return false;
+}
+/** 点背景 / 按 Escape 才走这里。
+    Android 键盘弹出会把面板顶上去，手指常常落在背景层上 ——
+    正在填东西时不能就这样关掉，不然打一半全没了。 */
+function bdClose(){
+  if(sheetDirty()){ toast('填好按储存，或按取消','bad'); return }
+  closeSheet();
+}
 function closeSheet(){var s=document.getElementById('sheet');
   if(!s)return; s.className='sheet';
   // 收起后清空内容，避免旧的弹窗残留
@@ -307,7 +324,7 @@ function closeSheet(){var s=document.getElementById('sheet');
 }
 /* 保险：碰到画面任何地方就把通知收掉；返回键 / Esc 关弹窗 */
 document.addEventListener('pointerdown',function(){hideToast()},true);
-document.addEventListener('keydown',function(e){ if(e.key==='Escape'){hideToast();closeSheet()} });
+document.addEventListener('keydown',function(e){ if(e.key==='Escape'){hideToast();bdClose()} });
 
 /* ================= 登入 ================= */
 var PIN='', BUSY=false, AUTH='';
@@ -662,6 +679,18 @@ function saveSalesman(){
 }
 
 /* --- 进阶 --- */
+function ivBrChips(){
+  var list=(S.boot&&S.boot.brands)||[];
+  var cur=F.invBrand||'';
+  return '<button class="chip'+(cur?'':' on')+'" onclick="pickIvBr(\'\')">跟分行一样</button>'+
+    list.map(function(b){
+      return '<button class="chip'+(cur===b?' on':'')+'" onclick="pickIvBr(\''+esc(b).replace(/'/g,"\\'")+'\')">'+esc(b)+'</button>'
+    }).join('');
+}
+function pickIvBr(v){
+  F.invBrand=v;
+  var e=document.getElementById('ivBr'); if(e)e.innerHTML=ivBrChips();
+}
 function pickIvTo(v){
   F.invoiceTo=v;
   var e=document.getElementById('ivTo'); if(!e)return;
@@ -684,6 +713,10 @@ function advSheet(){
      '<button class="chip'+(F.invoiceTo==='COMPANY'?' on':'')+'" onclick="pickIvTo(\'COMPANY\')">车行公司</button>'+
    '</div>'+
    '<div class="hint" style="margin-bottom:14px">月尾开发票时会照这个分。会记住上一次选的。</div>'+
+   '<label class="lbl">发票上的牌子</label>'+
+   '<div class="chips" id="ivBr" style="margin-bottom:6px">'+ivBrChips()+'</div>'+
+   '<div class="hint" style="margin-bottom:14px">预设跟分行一样（'+esc(F.brand||'—')+'）。'+
+     '客人买的是别的牌子才要改，发票会照这里印。</div>'+
    '<div style="height:13px"></div><label class="lbl">备注</label>'+
    '<input class="inp" id="ovN" placeholder="选填" value="'+esc(F.note)+'">'+
    '<div style="height:22px"></div><button class="btn p" onclick="advSave()">套用</button>');
@@ -704,12 +737,12 @@ function submit(){
     payStatus:F.paid?'PAID':'UNPAID',payMethod:F.payMethod,payDate:F.payDate||today(),payNote:F.payNote,
     drvColor:F.drvColor,drvGrade:F.drvGrade||F.drvDesc,drvNote:F.drvNote,
     totalOverride:F.ovTotal,myIncomeOverride:F.ovMine,driverFeeOverride:F.ovFee,
-    invoiceTo:F.invoiceTo,by:S.user.name}])
+    invoiceTo:F.invoiceTo,invBrand:F.invBrand,by:S.user.name}])
   .then(function(r){
     btn.removeAttribute('disabled');btn.textContent='确认下单';
     if(!r.ok){toast(r.msg,'bad');return}
     successSheet(r.order,r.wa);
-    F.setType='';F.price=0;F.profit=0;F.qty=1;F.ovTotal='';F.ovMine='';F.ovFee='';F.note='';
+    F.setType='';F.price=0;F.profit=0;F.qty=1;F.ovTotal='';F.ovMine='';F.ovFee='';F.note='';F.invBrand='';
     F.salesman='';F.branch='';F.state='';F.region='';F.brand='';
     F.paid=false;F.payMethod='OP';F.payDate='';F.payNote='';
     F.drvGrade='';F.drvNote='';F.drvDesc='';   // 颜色留着，下一单多半一样
@@ -1338,19 +1371,29 @@ function doVoidInv(no){
     toast(no+' 已作废','ok'); loadInv(IV.ym);
   }).catch(function(e){toast(String(e.message||e),'bad')});
 }
+var BILLDRAFT={};
+/** 边填边记在记忆体里 —— 万一弹窗被关掉，重开会把填过的带回来 */
+function billDraft(name){
+  var d=BILLDRAFT[name]||(BILLDRAFT[name]={});
+  ['bT','bC','bA','bP'].forEach(function(id){
+    var e=document.getElementById(id); if(e)d[id]=e.value;
+  });
+}
 function editBill(name){
   call('getBillTo',[{salesman:name}]).then(function(r){
     if(!r.ok){toast(r.msg,'bad');return}
+    var d=BILLDRAFT[name]||{};
+    var v=function(id,fallback){ return d[id]!==undefined?d[id]:fallback };
     openSheet('<div style="font-family:var(--sf);font-size:25px;margin-bottom:3px">发票资料</div>'+
      '<div class="h1s" style="margin-bottom:18px">'+esc(name)+'</div>'+
      '<label class="lbl">发票抬头（个人全名）</label>'+
-     '<input class="inp" id="bT" placeholder="例：Farid bin Ahmad" value="'+esc(r.title)+'" style="margin-bottom:12px">'+
+     '<input class="inp" id="bT" oninput="billDraft(\''+esc(name).replace(/'/g,"\\'")+'\')" placeholder="例：Farid bin Ahmad" value="'+esc(v('bT',r.title))+'" style="margin-bottom:12px">'+
      '<label class="lbl">公司名（开给公司时用）</label>'+
-     '<input class="inp" id="bC" placeholder="例：PUNCAK MERAK SDN BHD" value="'+esc(r.company)+'" style="margin-bottom:12px">'+
+     '<input class="inp" id="bC" oninput="billDraft(\''+esc(name).replace(/'/g,"\\'")+'\')" placeholder="例：PUNCAK MERAK SDN BHD" value="'+esc(v('bC',r.company))+'" style="margin-bottom:12px">'+
      '<label class="lbl">地址</label>'+
-     '<input class="inp" id="bA" placeholder="发票上印的地址" value="'+esc(r.addr)+'" style="margin-bottom:12px">'+
+     '<input class="inp" id="bA" oninput="billDraft(\''+esc(name).replace(/'/g,"\\'")+'\')" placeholder="发票上印的地址" value="'+esc(v('bA',r.addr))+'" style="margin-bottom:12px">'+
      '<label class="lbl">电话</label>'+
-     '<input class="inp" id="bP" placeholder="选填" value="'+esc(r.tel)+'" style="margin-bottom:16px">'+
+     '<input class="inp" id="bP" oninput="billDraft(\''+esc(name).replace(/'/g,"\\'")+'\')" placeholder="选填" value="'+esc(v('bP',r.tel))+'" style="margin-bottom:16px">'+
      '<button class="btn p" onclick="saveBill(\''+esc(name).replace(/'/g,"\\'")+'\')">储存</button>'+
      '<div style="height:9px"></div><button class="btn o" onclick="drawInvList()">返回</button>');
   }).catch(function(e){toast(String(e.message||e),'bad')});
@@ -1361,6 +1404,7 @@ function saveBill(name){
     addr:document.getElementById('bA').value,tel:document.getElementById('bP').value}])
   .then(function(r){
     if(!r.ok){toast(r.msg,'bad');return}
+    delete BILLDRAFT[name];
     toast('已储存','ok'); loadInv(IV.ym);
   }).catch(function(e){toast(String(e.message||e),'bad')});
 }
