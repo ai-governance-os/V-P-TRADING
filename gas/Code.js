@@ -1875,9 +1875,13 @@ function billTo_(salesman, mode, t) {
   t.rows.forEach(function (r) { if (!hit && up_(r.SALESMAN) === up_(salesman)) hit = r; });
   var company = hit ? String(hit['公司名'] || '').trim() : '';
   var title = hit ? String(hit['发票抬头'] || '').trim() : '';
+  var nm = (mode === 'COMPANY' ? (company || title) : (title || String(salesman))) || String(salesman);
+  // 抬头和公司名填一样时只印一次，不要在发票上连印两行同样的名字
+  var co = (mode === 'COMPANY') ? '' : company;
+  if (co && up_(co) === up_(nm)) co = '';
   return {
-    name: (mode === 'COMPANY' ? (company || title) : (title || String(salesman))) || String(salesman),
-    company: mode === 'COMPANY' ? '' : company,
+    name: nm,
+    company: co,
     addr: hit ? String(hit['地址'] || '').trim() : '',
     tel: hit ? String(hit['电话'] || '').trim() : '',
     branch: hit ? String(hit.BRANCH || '').trim() : ''
