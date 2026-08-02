@@ -1,4 +1,5 @@
 <!--SRC:__BUILD_ID__-->
+<!--PAGE_BUILD:<?= (typeof BUILD_ID === 'string' ? BUILD_ID : '') ?>-->
 <!--RUN:<?= (typeof BUILD_ID === 'string' ? BUILD_ID : 'unknown') ?>-->
 <!DOCTYPE html>
 <html lang="zh">
@@ -242,6 +243,8 @@ select.inp{appearance:none;background-image:linear-gradient(45deg,transparent 50
 
 <script>
 /* ================= 状态 ================= */
+/* 这个页面载入当下的版本号（手机快取住旧页面时会跟後端不一样）*/
+var PAGE_BUILD='<?= (typeof BUILD_ID === "string" ? BUILD_ID : "") ?>';
 var S={user:null,boot:null,view:'order',sel:{},dash:null,orders:[],month:0,bill:null,billMonth:0};
 var F={ // 表单
   salesman:'',branch:'',brand:'',state:'',region:'',setType:'',price:0,profit:0,qty:1,
@@ -356,10 +359,28 @@ function doLogin(){
     S.user=r.user; S.boot=r.boot; F.pay=r.boot.defaultPay||'OP';
     S.view=(r.user.role==='driver')?'driver':'order';
     AUTH=PIN; BUSY=false; PIN=''; renderApp();
+    checkStale(r.boot&&r.boot.build);
   }).catch(function(e){
     clearTimeout(tick); pinBusy(false);
     document.getElementById('perr').textContent=String(e.message||e);
   });
+}
+/* 手机把整个页面快取住时，画面会停在旧版本 —— 後端已经更新了他还是看不到。
+   页面载入时烘进来的版本号，跟後端现在的版本号一比就知道。 */
+function checkStale(serverBuild){
+  if(!serverBuild||!PAGE_BUILD||serverBuild===PAGE_BUILD)return;
+  var bar=document.createElement('div');
+  bar.style.cssText='position:fixed;left:0;right:0;top:0;z-index:900;padding:11px 14px;'+
+    'background:linear-gradient(180deg,#3a2f10,#2a220c);border-bottom:1px solid rgba(233,168,53,.5);'+
+    'color:#f0c96a;font-size:13px;display:flex;align-items:center;gap:10px';
+  bar.innerHTML='<span style="flex:1">有新版本（你手机上是旧的）</span>'+
+    '<button style="background:#e9a835;color:#1a1408;border:0;border-radius:8px;'+
+    'padding:7px 14px;font-size:13px;font-weight:600">立即更新</button>';
+  bar.querySelector('button').onclick=function(){
+    try{ if(window.caches&&caches.keys)caches.keys().then(function(k){k.forEach(function(n){caches.delete(n)})}) }catch(e){}
+    location.reload(true);
+  };
+  document.body.appendChild(bar);
 }
 function logout(){
   if(!confirm('确定登出？'))return;

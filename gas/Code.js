@@ -478,6 +478,7 @@ function buildBoot_() {
     payOptions: String(cfg.PAY_STATUS_OPTIONS || 'OP,PC,PAID,PENDING').split(',').map(function (s) { return s.trim(); }),
     defaultPay: cfg.DEFAULT_PAY_STATUS || 'OP',
     driver: { name: String(drv.DRIVER_NAME || ''), phone: String(drv.PHONE || '').replace(/[^0-9]/g, ''), allowance: toNum_(drv.ALLOWANCE_PER_MONTH) },
+    build: (typeof BUILD_ID === 'string' ? BUILD_ID : ''),
     setTypes: setTypes,
     people: people,
     branches: branches
@@ -1796,9 +1797,9 @@ function invNameOf_(setType, desc) {
   return st;   // 没见过的自己写，之後可在价目表手改
 }
 
-/** 价目表里那一栏（可手改）；没填就用规则推 */
-function invNameFor_(setType, price) {
-  var t = ensureCols_('SET_PRICE', ['说明', '英文品名']);
+/** 价目表里那一栏（可手改）；没填就用规则推。t 同样可以从外面传进来 */
+function invNameFor_(setType, price, t) {
+  t = t || ensureCols_('SET_PRICE', ['说明', '英文品名']);
   var hit = null;
   t.rows.forEach(function (r) {
     if (up_(r.SET_TYPE) === up_(setType) && toNum_(r.UNIT_PRICE) === toNum_(price)) hit = r;
@@ -1828,14 +1829,33 @@ function fillInvNames() {
   return { ok: true, filled: n };
 }
 
+/**
+ * 发票上该印哪个牌子。
+ * 同一个人可能一次买了不同牌子的货，而分行只代表他在哪里上班，
+ * 所以分行的 BRAND 不一定等於货的牌子 —— 客户是把牌子写在备注里的。
+ * 备注有写就以备注为准，没写才用分行的品牌。
+ */
+var INV_BRANDS_ = ['PERODUA', 'PROTON', 'HONDA', 'CHERY', 'JAECOO', 'JETOUR',
+                   'MITSUBISHI', 'EMAS', 'ICAUR', 'TOYOTA', 'NISSAN'];
+function invBrandOf_(r) {
+  var note = up_(r.NOTE || '');
+  for (var i = 0; i < INV_BRANDS_.length; i++) {
+    if (note.indexOf(INV_BRANDS_[i]) >= 0) return INV_BRANDS_[i];
+  }
+  var b = String(r.BRAND || '').trim();
+  return (b && b !== 'OTHER') ? b : '';
+}
+
 /** 一个客户 = 销售员 ＋ 开给谁（本人 / 公司）。同月同客户 = 一张发票。 */
 function custKey_(o) {
   return up_(o.SALESMAN) + '|' + (up_(o.INVOICE_TO) === 'COMPANY' ? 'COMPANY' : 'SA');
 }
 
-/** 销售员那几栏发票资料 */
-function billTo_(salesman, mode) {
-  var t = ensureCols_('SALESMAN', ['发票抬头', '公司名', '地址', '电话']);
+/** 销售员那几栏发票资料。
+    t 可以从外面传进来 —— 不传的话每呼叫一次就重读整张 SALESMAN 表，
+    一个月三十个客户就是三十次全表读取，那正是开发票清单要跑 30 秒的原因。 */
+function billTo_(salesman, mode, t) {
+  t = t || ensureCols_('SALESMAN', ['发票抬头', '公司名', '地址', '电话']);
   var hit = null;
   t.rows.forEach(function (r) { if (!hit && up_(r.SALESMAN) === up_(salesman)) hit = r; });
   var company = hit ? String(hit['公司名'] || '').trim() : '';
@@ -1899,6 +1919,7 @@ function listInvoiceMonth(p) {
 
   var t = ensureCols_('ORDERS', ['INVOICE_TO']);
   var sp = ensureCols_('SET_PRICE', ['说明', '英文品名']);
+  var smT = ensureCols_('SALESMAN', ['发票抬头', '公司名', '地址', '电话']);   // 只读一次
   var graded = {};
   sp.rows.forEach(function (r) {
     if (!r.SET_TYPE) return;
@@ -1918,7 +1939,7 @@ function listInvoiceMonth(p) {
     var mode = up_(r.INVOICE_TO) === 'COMPANY' ? 'COMPANY' : 'SA';
     var key = custKey_(r);
     if (!g[key]) {
-      var b = billTo_(r.SALESMAN, mode);
+      var b = billTo_(r.SALESMAN, mode, smT);
       g[key] = { key: key, salesman: String(r.SALESMAN || ''), mode: mode,
                  billName: b.name, branch: b.branch || String(r.BRANCH || ''),
                  hasAddr: !!b.addr, n: 0, amount: 0 };
@@ -1951,6 +1972,8 @@ function getInvoice(p) {
   var salesman = key.split('|')[0];
 
   var t = ensureCols_('ORDERS', ['INVOICE_TO']);
+  var spT = ensureCols_('SET_PRICE', ['说明', '英文品名']);                    // 只读一次
+  var smT = ensureCols_('SALESMAN', ['发票抬头', '公司名', '地址', '电话']);   // 只读一次
   var lines = [], sub = 0, qty = 0, gross = 0;
   t.rows.forEach(function (r) {
     if (isVoid_(r) || custKey_(r) !== key) return;
@@ -1958,12 +1981,12 @@ function getInvoice(p) {
     var d = fmtDate_(r.DATE);
     if (d.slice(0, 4) !== yy || parseInt(String(r.MONTH), 10) !== mm) return;
     var q = toNum_(r.QTY), pr = toNum_(r.UNIT_PRICE), tot = toNum_(r.TOTAL_INCOME);
-    var brand = String(r.BRAND || '').trim();
-    var nm = invNameFor_(r.SET_TYPE, pr);
+    var brand = invBrandOf_(r);
+    var nm = invNameFor_(r.SET_TYPE, pr, spT);
     lines.push({
       date: shortDate_(d),
       iso: d,
-      desc: (brand && brand !== 'OTHER' ? brand + ' ' : '') + nm,
+      desc: (brand ? brand + ' ' : '') + nm,
       qty: q, unit: unitOf_(r.SET_TYPE), price: pr,
       amount: Math.round(q * pr * 100) / 100,
       total: tot
@@ -1977,7 +2000,7 @@ function getInvoice(p) {
   sub = Math.round(sub * 100) / 100;
   var disc = Math.round((gross - sub) * 100) / 100;
 
-  var b = billTo_(salesman, mode);
+  var b = billTo_(salesman, mode, smT);
   return {
     ok: true, ym: ym, key: key, mode: mode, salesman: salesman,
     billTo: b, lines: lines, qty: qty,
@@ -1990,6 +2013,11 @@ function getInvoice(p) {
 function esc_(s) {
   return String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+/** 长地址会把表格撑到超出纸宽，右边的金额栏就被挤掉。
+    旧版渲染器只在空白处断行，所以逗号 / 斜线後面补一个空格。 */
+function wrapAddr_(s) {
+  return esc_(s).replace(/([,\/])(?=\S)/g, '$1 ').replace(/\n/g, '<br>');
 }
 function money_(n) {
   var v = Math.round(toNum_(n) * 100) / 100;
@@ -2038,15 +2066,15 @@ function invoiceHtml_(iv, invNo) {
 
     /* ── 客户 ＋ 发票资讯 ── */
     + '<table width="100%" cellpadding="0" cellspacing="0"><tr>'
-    + '<td valign="top" width="58%">'
+    + '<td valign="top" width="52%">'
     + '<div style="font-size:8.5pt;color:#777;text-decoration:underline;margin-bottom:4px">Customer Details</div>'
     + '<div style="font-size:11pt;font-weight:bold">' + esc_(b.name) + '</div>'
     + (b.company ? '<div style="font-size:10pt">' + esc_(b.company) + '</div>' : '')
     + (b.branch ? '<div style="font-size:9.5pt;color:#555">' + esc_(b.branch) + '</div>' : '')
-    + (b.addr ? '<div style="font-size:9.5pt;color:#333;margin-top:3px">' + esc_(b.addr).replace(/\n/g, '<br>') + '</div>' : '')
+    + (b.addr ? '<div style="font-size:9pt;color:#333;margin-top:3px">' + wrapAddr_(b.addr) + '</div>' : '')
     + (b.tel ? '<div style="font-size:9.5pt;color:#333">Tel: ' + esc_(b.tel) + '</div>' : '')
     + '</td>'
-    + '<td valign="top" width="42%">'
+    + '<td valign="top" width="48%">'
     + '<div style="font-size:17pt;font-weight:bold;letter-spacing:1px;margin-bottom:8px">INVOICE</div>'
     + '<table cellpadding="0" cellspacing="0" style="font-size:9.5pt">'
     + '<tr><td style="color:#777;padding-right:8px">Invoice No</td><td style="font-weight:bold">' + esc_(invNo) + '</td></tr>'
@@ -2054,7 +2082,7 @@ function invoiceHtml_(iv, invNo) {
     + '</table></td></tr></table>'
 
     /* ── 明细 ── */
-    + '<table width="100%" cellpadding="0" cellspacing="0" style="margin-top:16px">'
+    + '<table width="100%" cellpadding="0" cellspacing="0" style="margin-top:16px;table-layout:fixed">'
     + '<tr style="background:#f4f2ec">'
     + '<th align="left" style="padding:7px 4px;font-size:9pt;width:26px">#</th>'
     + '<th align="left" style="padding:7px 4px;font-size:9pt;width:76px">Date</th>'
