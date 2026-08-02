@@ -1835,12 +1835,27 @@ function fillInvNames() {
  * 所以分行的 BRAND 不一定等於货的牌子 —— 客户是把牌子写在备注里的。
  * 备注有写就以备注为准，没写才用分行的品牌。
  */
-var INV_BRANDS_ = ['PERODUA', 'PROTON', 'HONDA', 'CHERY', 'JAECOO', 'JETOUR',
-                   'MITSUBISHI', 'EMAS', 'ICAUR', 'TOYOTA', 'NISSAN'];
-function invBrandOf_(r) {
+var INV_BRANDS_FALLBACK_ = ['PERODUA', 'PROTON', 'HONDA', 'CHERY', 'JAECOO',
+                            'JETOUR', 'MITSUBISHI', 'EMAS', 'ICAUR'];
+/** 认得的牌子直接从 BRANCH 名单长出来 ——
+    他们以後开一间新品牌的分行，备注写那个牌子就自动认得，不必找我改程式。 */
+function invBrandList_() {
+  var out = {};
+  INV_BRANDS_FALLBACK_.forEach(function (b) { out[b] = 1; });
+  try {
+    readTable_('BRANCH').rows.forEach(function (r) {
+      var b = up_(r.BRAND);
+      if (b && b !== 'OTHER') out[b] = 1;
+    });
+  } catch (e) { }
+  // 长的排前面，免得 EMAS 抢在 E.MAS PUTRAJAYA 之类前面误判
+  return Object.keys(out).sort(function (a, b) { return b.length - a.length; });
+}
+function invBrandOf_(r, list) {
   var note = up_(r.NOTE || '');
-  for (var i = 0; i < INV_BRANDS_.length; i++) {
-    if (note.indexOf(INV_BRANDS_[i]) >= 0) return INV_BRANDS_[i];
+  list = list || invBrandList_();
+  for (var i = 0; i < list.length; i++) {
+    if (note.indexOf(list[i]) >= 0) return list[i];
   }
   var b = String(r.BRAND || '').trim();
   return (b && b !== 'OTHER') ? b : '';
@@ -1973,6 +1988,7 @@ function getInvoice(p) {
 
   var t = ensureCols_('ORDERS', ['INVOICE_TO']);
   var spT = ensureCols_('SET_PRICE', ['说明', '英文品名']);                    // 只读一次
+  var brandList = invBrandList_();                                            // 只算一次
   var smT = ensureCols_('SALESMAN', ['发票抬头', '公司名', '地址', '电话']);   // 只读一次
   var lines = [], sub = 0, qty = 0, gross = 0;
   t.rows.forEach(function (r) {
@@ -1981,7 +1997,7 @@ function getInvoice(p) {
     var d = fmtDate_(r.DATE);
     if (d.slice(0, 4) !== yy || parseInt(String(r.MONTH), 10) !== mm) return;
     var q = toNum_(r.QTY), pr = toNum_(r.UNIT_PRICE), tot = toNum_(r.TOTAL_INCOME);
-    var brand = invBrandOf_(r);
+    var brand = invBrandOf_(r, brandList);
     var nm = invNameFor_(r.SET_TYPE, pr, spT);
     lines.push({
       date: shortDate_(d),
