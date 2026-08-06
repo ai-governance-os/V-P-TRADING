@@ -50,6 +50,45 @@ function readTable_(name) {
   return { head: head, rows: rows, headRow: hr + 1, sheet: sheet };
 }
 
+/**
+ * 只读最後 n 笔资料（表头照样抓）。
+ * 用在「只要最新几百笔」的地方，免得为了 300 笔把一千多列整张搬回来。
+ * truncated = true 表示上面还有没读到的资料，呼叫端要自己决定要不要补读整张。
+ */
+function readTailTable_(name, n) {
+  var sheet = sh_(name);
+  var lastRow = sheet.getLastRow(), lastCol = sheet.getLastColumn();
+  var empty = { head: [], rows: [], headRow: 1, sheet: sheet, truncated: false };
+  if (!lastRow || !lastCol) return empty;
+
+  // 表头可能不在第 1 列（上面有说明行），跟 readTable_ 用同一套判断
+  var top = sheet.getRange(1, 1, Math.min(5, lastRow), lastCol).getValues();
+  var hr = -1, head = null;
+  for (var i = 0; i < top.length; i++) {
+    var nonEmpty = top[i].filter(function (x) { return x !== '' && x !== null; }).length;
+    if (nonEmpty >= 2) { hr = i; head = top[i].map(function (h) { return String(h).trim(); }); break; }
+  }
+  if (!head) return empty;
+
+  var firstData = hr + 2;                 // 表头的下一列（1-based）
+  var total = lastRow - firstData + 1;
+  if (total <= 0) return { head: head, rows: [], headRow: hr + 1, sheet: sheet, truncated: false };
+
+  var take = Math.min(n, total);
+  var startRow = lastRow - take + 1;
+  var v = sheet.getRange(startRow, 1, take, lastCol).getValues();
+
+  var rows = [];
+  for (var r = 0; r < v.length; r++) {
+    if (v[r].every(function (x) { return x === '' || x === null; })) continue;
+    var o = {};
+    for (var c = 0; c < head.length; c++) if (head[c]) o[head[c]] = v[r][c];
+    o.__row = startRow + r;
+    rows.push(o);
+  }
+  return { head: head, rows: rows, headRow: hr + 1, sheet: sheet, truncated: take < total };
+}
+
 function toNum_(x) { var n = parseFloat(x); return isNaN(n) ? 0 : n; }
 function up_(x) { return String(x == null ? '' : x).trim().toUpperCase(); }
 
@@ -1102,8 +1141,28 @@ function getDashboard(opt) {
 /* ---------- 订单清单 ---------- */
 function getOrders(opt) {
   opt = opt || {};
-  var t = readTable_('ORDERS');
+  var lim = opt.limit || 300;
   var q = up_(opt.q || '');
+
+  // 订单越来越多（已经一千多笔），整张表搬回来要十几秒，手机等不及会把分页丢掉。
+  // 迴圈本来就从最新往回跑、满 lim 就停 —— 所以「没有任何筛选」时只读尾巴就够。
+  //
+  // 有筛选（月份／收款／未送／搜寻）就直接读整张：
+  // 那些情况筛完通常凑不满 lim，走尾巴只会变成「读了尾巴又读整张」，比原本更慢。
+  var filtered = !!(q || opt.month || opt.pay || opt.pending);
+  if (filtered) return pickOrders_(readTable_('ORDERS'), opt, q, lim);
+
+  // 只会跳过作废单（很少），抓 lim + 60 列绰绰有余
+  var t = readTailTable_('ORDERS', lim + 60);
+  var out = pickOrders_(t, opt, q, lim);
+  // 万一真的凑不满而且上面还有资料 → 补读整张，结果跟以前完全一样
+  if (out.length < lim && t.truncated) {
+    out = pickOrders_(readTable_('ORDERS'), opt, q, lim);
+  }
+  return out;
+}
+
+function pickOrders_(t, opt, q, lim) {
   var out = [];
   for (var i = t.rows.length - 1; i >= 0; i--) {
     var r = t.rows[i];
@@ -1123,9 +1182,9 @@ function getOrders(opt) {
       delivery: String(r.DELIVERY_STATUS || ''), region: String(r.REGION || ''),
       state: String(r.STATE || ''), note: String(r.NOTE || ''), status: up_(r.STATUS) || 'ACTIVE',
       drvColor: String(r.DRV_COLOR || ''), drvGrade: String(r.DRV_GRADE || ''),
-      drvNote: String(r.DRV_NOTE || '')
+      drvNote: String(r.DRV_NOTE || ''), invBrand: String(r.INV_BRAND || '')
     });
-    if (out.length >= (opt.limit || 300)) break;
+    if (out.length >= lim) break;
   }
   return out;
 }
@@ -1859,11 +1918,19 @@ function invBrandOf_(r, list) {
   // 下单时直接选的最优先；其次是备注里写的（旧资料都是这样）；最後才是分行的品牌
   var picked = up_(r.INV_BRAND || '');
   if (picked) return picked;
-  var note = up_(r.NOTE || '');
   list = list || invBrandList_();
-  for (var i = 0; i < list.length; i++) {
-    if (note.indexOf(list[i]) >= 0) return list[i];
+
+  // 备注优先。找不到再看「特别交代」——
+  // 那格本来是写给司机的，但品牌选项以前收在「进阶」里，客户看不到，
+  // 就顺手把品牌打在这格（Jaecoo Goodies bag 之类）。这里一并认，旧单不必重打。
+  var texts = [up_(r.NOTE || ''), up_(r.DRV_NOTE || '')];
+  for (var t = 0; t < texts.length; t++) {
+    if (!texts[t]) continue;
+    for (var i = 0; i < list.length; i++) {
+      if (texts[t].indexOf(list[i]) >= 0) return list[i];
+    }
   }
+
   var b = String(r.BRAND || '').trim();
   return (b && b !== 'OTHER') ? b : '';
 }

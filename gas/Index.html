@@ -487,6 +487,15 @@ function renderOrder(){
    '<button onclick="qty(1)">+</button></div>'+
    '<div style="height:16px"></div>'+
    '<div style="border-top:1px solid var(--line);padding-top:14px">'+
+     '<label class="lbl" style="color:var(--gold2)">发票上的牌子</label>'+
+     '<div style="color:var(--dim2);font-size:12px;margin:-4px 0 10px">月尾开发票会照这里印</div>'+
+     '<div class="chips" id="ivBrMain">'+ivBrChips()+'</div>'+
+     '<div class="hint" style="margin-top:10px">预设跟分行一样（'+esc(F.brand||'—')+'）。'+
+       '客人买的是别的牌子，点这里改就好 —— 不要写在下面的「特别交代」。</div>'+
+   '</div>'+
+
+   '<div style="height:16px"></div>'+
+   '<div style="border-top:1px solid var(--line);padding-top:14px">'+
      '<label class="lbl" style="color:var(--gold2)">给司机看的</label>'+
      '<div style="color:var(--dim2);font-size:12px;margin:-4px 0 10px">会印在 WhatsApp 送货单上</div>'+
      '<div class="chips" style="margin-bottom:10px">'+
@@ -498,7 +507,7 @@ function renderOrder(){
          '" onclick="F.drvGrade=(F.drvGrade===\''+g+'\'?\'\':\''+g+'\');renderOrder()">'+g+'</button>'}).join('')+
        (F.drvDesc&&!F.drvGrade?'<span style="align-self:center;font-size:12px;color:var(--dim2);margin-left:4px">价目表：'+esc(F.drvDesc)+'</span>':'')+
      '</div>'+
-     '<input class="inp" placeholder="特别交代（少用）例如 不要 Thermos" value="'+esc(F.drvNote)+'" '+
+     '<input class="inp" placeholder="特别交代（司机看的·不影响发票）例如 不要 Thermos" value="'+esc(F.drvNote)+'" '+
        'oninput="F.drvNote=this.value" style="font-size:14px">'+
      (drvPreview()?'<div class="hint" style="margin-top:10px;background:rgba(201,162,39,.07);border-color:rgba(201,162,39,.22);color:var(--gold2)">'+
         '司机会看到：'+esc(drvPreview())+'</div>':'')+
@@ -689,7 +698,24 @@ function ivBrChips(){
 }
 function pickIvBr(v){
   F.invBrand=v;
-  var e=document.getElementById('ivBr'); if(e)e.innerHTML=ivBrChips();
+  // 下单页主画面和「进阶」都可能开着，两边都要跟着换
+  ['ivBrMain','ivBr'].forEach(function(id){
+    var e=document.getElementById(id); if(e)e.innerHTML=ivBrChips();
+  });
+}
+
+/* 编辑视窗的发票品牌 —— 用自己的状态，不能碰下单表单的 F.invBrand */
+var EDITBR='';
+function edBrChips(){
+  var list=(S.boot&&S.boot.brands)||[];
+  return '<button class="chip'+(EDITBR?'':' on')+'" onclick="pickEdBr(\'\')">跟分行一样</button>'+
+    list.map(function(b){
+      return '<button class="chip'+(EDITBR===b?' on':'')+'" onclick="pickEdBr(\''+esc(b).replace(/'/g,"\\'")+'\')">'+esc(b)+'</button>'
+    }).join('');
+}
+function pickEdBr(v){
+  EDITBR=v;
+  var e=document.getElementById('ivBrEdit'); if(e)e.innerHTML=edBrChips();
 }
 function pickIvTo(v){
   F.invoiceTo=v;
@@ -713,10 +739,7 @@ function advSheet(){
      '<button class="chip'+(F.invoiceTo==='COMPANY'?' on':'')+'" onclick="pickIvTo(\'COMPANY\')">车行公司</button>'+
    '</div>'+
    '<div class="hint" style="margin-bottom:14px">月尾开发票时会照这个分。会记住上一次选的。</div>'+
-   '<label class="lbl">发票上的牌子</label>'+
-   '<div class="chips" id="ivBr" style="margin-bottom:6px">'+ivBrChips()+'</div>'+
-   '<div class="hint" style="margin-bottom:14px">预设跟分行一样（'+esc(F.brand||'—')+'）。'+
-     '客人买的是别的牌子才要改，发票会照这里印。</div>'+
+   '<div class="hint" style="margin-bottom:14px">发票上的牌子已经搬到下单页面上，不用进来这里改。</div>'+
    '<div style="height:13px"></div><label class="lbl">备注</label>'+
    '<input class="inp" id="ovN" placeholder="选填" value="'+esc(F.note)+'">'+
    '<div style="height:22px"></div><button class="btn p" onclick="advSave()">套用</button>');
@@ -937,6 +960,7 @@ function openOrder(id){
   var o=findO(id); if(!o)return;
   var admin=boss(), canEdit=boss();
   var tiers=(S.boot.setTypes[o.setType]||[]);
+  EDITBR=o.invBrand||'';
   openSheet('<div style="font-family:var(--sf);font-size:25px;margin-bottom:3px">'+esc(o.salesman)+'</div>'+
    '<div class="h1s" style="margin-bottom:18px">'+esc(o.branch)+' · '+esc(o.date)+' · '+esc(o.id)+'</div>'+
    '<div class="card"><div class="sumrow"><span class="k">'+esc(o.setType)+'</span>'+
@@ -977,6 +1001,10 @@ function openOrder(id){
         '</div>'
        :'<button class="btn p" style="padding:13px;font-size:15px;margin-bottom:11px" onclick="askPay(\''+o.id+'\')">收到钱了 — 记录收款</button>')+
      '<div class="lbl">备注</div><input class="inp" id="eN" placeholder="选填" value="'+esc(o.note||'')+'">'+
+     '<div style="height:14px"></div>'+
+     '<div class="lbl">发票上的牌子</div>'+
+     '<div class="chips" id="ivBrEdit" style="margin-bottom:6px">'+edBrChips()+'</div>'+
+     '<div class="hint" style="margin-bottom:4px">预设跟分行一样（'+esc(o.branch||'—')+'）。改了以後这张发票就照这里印。</div>'+
      '<div style="height:18px"></div>'+
      '<button class="btn p" onclick="saveOrder(\''+o.id+'\')">储存修改</button>'+
      '<div style="height:9px"></div>'+
@@ -989,6 +1017,7 @@ function ePick(b){document.querySelectorAll('#ePay .chip').forEach(function(c){c
 function saveOrder(id){
   call('updateOrder',[{id:id,qty:document.getElementById('eQ').value,price:document.getElementById('eP').value,
     note:document.getElementById('eN').value,
+    invBrand:EDITBR,
     totalOverride:(document.getElementById('eT')||{}).value||'',
     myIncomeOverride:'',driverFeeOverride:''}])
   .then(function(r){
