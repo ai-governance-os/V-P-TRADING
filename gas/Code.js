@@ -2084,6 +2084,14 @@ function listInvoiceMonth(p) {
     var k = up_(r.SET_TYPE) + '|' + toNum_(r.UNIT_PRICE);
     if (String(r['说明'] || '').trim() || String(r['英文品名'] || '').trim()) graded[k] = 1;
   });
+  // 先看这个月已经开出去哪些发票 —— 决定谁能走逐笔要用到
+  var issued = {}, voided = {};
+  invSheet_().rows.forEach(function (r) {
+    if (String(r.YM) !== ym) return;
+    if (invVoided_(r)) { voided[up_(r.CUST_KEY)] = (voided[up_(r.CUST_KEY)] || 0) + 1; return; }
+    issued[up_(r.CUST_KEY)] = String(r.INV_NO);
+  });
+
   var needMap = {};
   var g = {};
   t.rows.forEach(function (r) {
@@ -2095,7 +2103,9 @@ function listInvoiceMonth(p) {
     if (!graded[gk] && !DESC_FALLBACK_[gk] && !/^BAGS?$/.test(up_(r.SET_TYPE)))
       needMap[String(r.SET_TYPE).trim() + ' RM ' + toNum_(r.UNIT_PRICE)] = 1;
     var mode = up_(r.INVOICE_TO) === 'COMPANY' ? 'COMPANY' : 'SA';
-    var po = !!perOrder[up_(r.SALESMAN)];
+    // 这个月如果已经用「月结」开过发票了，就维持月结 ——
+    // 不然同一笔生意会再拿一个新号码，变成开了两张。已经开出去的不动。
+    var po = !!perOrder[up_(r.SALESMAN)] && !issued[up_(custKey_(r))];
     var key = custKey_(r, po);
     if (!g[key]) {
       var b = billTo_(r.SALESMAN, mode, smT);
@@ -2110,12 +2120,6 @@ function listInvoiceMonth(p) {
   });
 
   var need = Object.keys(needMap).sort();
-  var issued = {}, voided = {};
-  invSheet_().rows.forEach(function (r) {
-    if (String(r.YM) !== ym) return;
-    if (invVoided_(r)) { voided[up_(r.CUST_KEY)] = (voided[up_(r.CUST_KEY)] || 0) + 1; return; }
-    issued[up_(r.CUST_KEY)] = String(r.INV_NO);
-  });
 
   var list = Object.keys(g).map(function (k) {
     g[k].amount = Math.round(g[k].amount * 100) / 100;
