@@ -1969,8 +1969,32 @@ function invBrandOf_(r, list) {
 }
 
 /** 一个客户 = 销售员 ＋ 开给谁（本人 / 公司）。同月同客户 = 一张发票。 */
-function custKey_(o) {
-  return up_(o.SALESMAN) + '|' + (up_(o.INVOICE_TO) === 'COMPANY' ? 'COMPANY' : 'SA');
+function custKey_(o, perOrder) {
+  var base = up_(o.SALESMAN) + '|' + (up_(o.INVOICE_TO) === 'COMPANY' ? 'COMPANY' : 'SA');
+  // 逐笔开单的客户：键後面挂订单号，一笔就是一张发票。
+  // 这样 invNoFor_ 完全不用改 —— 它只比对 CUST_KEY 字串，
+  // 「同月同客户重印不变号」「作废不重用号码」两条保证自动继承。
+  return perOrder ? base + '#' + String(o.ORDER_ID || '').trim() : base;
+}
+
+/** 从扩充键拆出订单号；月结的键没有 '#'，回传空字串。 */
+function keyOrderId_(key) {
+  var i = String(key).indexOf('#');
+  return i < 0 ? '' : String(key).slice(i + 1).trim();
+}
+
+/**
+ * 这个销售员是「月结」还是「逐笔」。
+ * 存在 SALESMAN 分页的「发票方式」栏，留空 = 月结（现状，绝大多数）。
+ */
+function perOrderSet_(t) {
+  t = t || ensureCols_('SALESMAN', ['发票抬头', '公司名', '地址', '电话', '发票方式']);
+  var set = {};
+  t.rows.forEach(function (r) {
+    var v = String(r['发票方式'] || '').trim();
+    if (/逐笔|逐筆|PER.?ORDER|EACH/i.test(v)) set[up_(r.SALESMAN)] = 1;
+  });
+  return set;
 }
 
 /** 销售员那几栏发票资料。
@@ -2052,7 +2076,8 @@ function listInvoiceMonth(p) {
 
   var t = ensureCols_('ORDERS', ['INVOICE_TO', 'INV_BRAND']);
   var sp = ensureCols_('SET_PRICE', ['说明', '英文品名']);
-  var smT = ensureCols_('SALESMAN', ['发票抬头', '公司名', '地址', '电话']);   // 只读一次
+  var smT = ensureCols_('SALESMAN', ['发票抬头', '公司名', '地址', '电话', '发票方式']);   // 只读一次
+  var perOrder = perOrderSet_(smT);
   var graded = {};
   sp.rows.forEach(function (r) {
     if (!r.SET_TYPE) return;
@@ -2070,12 +2095,16 @@ function listInvoiceMonth(p) {
     if (!graded[gk] && !DESC_FALLBACK_[gk] && !/^BAGS?$/.test(up_(r.SET_TYPE)))
       needMap[String(r.SET_TYPE).trim() + ' RM ' + toNum_(r.UNIT_PRICE)] = 1;
     var mode = up_(r.INVOICE_TO) === 'COMPANY' ? 'COMPANY' : 'SA';
-    var key = custKey_(r);
+    var po = !!perOrder[up_(r.SALESMAN)];
+    var key = custKey_(r, po);
     if (!g[key]) {
       var b = billTo_(r.SALESMAN, mode, smT);
       g[key] = { key: key, salesman: String(r.SALESMAN || ''), mode: mode,
                  billName: b.name, branch: b.branch || String(r.BRANCH || ''),
-                 hasAddr: !!b.addr, n: 0, amount: 0 };
+                 hasAddr: !!b.addr, n: 0, amount: 0,
+                 perOrder: po,
+                 orderId: po ? String(r.ORDER_ID || '').trim() : '',
+                 date: po ? fmtDate_(r.DATE) : '' };
     }
     g[key].n++; g[key].amount += toNum_(r.TOTAL_INCOME);
   });
@@ -2104,16 +2133,21 @@ function getInvoice(p) {
   var key = String((p && p.key) || '').trim();
   if (!/^\d{4}$/.test(ym) || !key) return { ok: false, msg: '参数不对' };
   var yy = '20' + ym.slice(0, 2), mm = parseInt(ym.slice(2), 10);
-  var mode = key.split('|')[1] === 'COMPANY' ? 'COMPANY' : 'SA';
-  var salesman = key.split('|')[0];
+  var wantOrder = keyOrderId_(key);                       // 逐笔才有值
+  var baseKey = wantOrder ? key.slice(0, key.indexOf('#')) : key;
+  var mode = baseKey.split('|')[1] === 'COMPANY' ? 'COMPANY' : 'SA';
+  var salesman = baseKey.split('|')[0];
 
   var t = ensureCols_('ORDERS', ['INVOICE_TO', 'INV_BRAND']);
   var spT = ensureCols_('SET_PRICE', ['说明', '英文品名']);                    // 只读一次
   var brandList = invBrandList_();                                            // 只算一次
-  var smT = ensureCols_('SALESMAN', ['发票抬头', '公司名', '地址', '电话']);   // 只读一次
+  var smT = ensureCols_('SALESMAN', ['发票抬头', '公司名', '地址', '电话', '发票方式']);   // 只读一次
+  var perOrder = perOrderSet_(smT);
   var lines = [], sub = 0, qty = 0, gross = 0;
   t.rows.forEach(function (r) {
-    if (isVoid_(r) || custKey_(r) !== key) return;
+    if (isVoid_(r) || custKey_(r) !== baseKey) return;
+    // 逐笔：只收这一笔订单
+    if (wantOrder && String(r.ORDER_ID || '').trim() !== wantOrder) return;
     // DATE 在表里是日期物件不是字串，一定要经过 fmtDate_
     var d = fmtDate_(r.DATE);
     if (d.slice(0, 4) !== yy || parseInt(String(r.MONTH), 10) !== mm) return;

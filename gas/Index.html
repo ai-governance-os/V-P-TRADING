@@ -1344,7 +1344,14 @@ function drawInvList(){
       '<span class="k" style="flex:1">'+
         '<b style="color:var(--ink);font-size:14.5px">'+esc(x.billName)+'</b>'+
         '<span style="opacity:.6;font-size:11.5px"> · '+(x.mode==='COMPANY'?'公司':'个人')+'</span>'+
-        '<br><span style="font-size:12px;opacity:.7">'+esc(x.branch)+' · '+x.n+' 笔 · RM '+rm(x.amount)+'</span>'+
+        (x.perOrder
+          ? '<span style="font-size:10.5px;margin-left:6px;padding:2px 7px;border-radius:5px;'+
+              'background:rgba(55,138,221,.16);color:#85B7EB">逐笔</span>'
+          : '<span style="font-size:10.5px;margin-left:6px;padding:2px 7px;border-radius:5px;'+
+              'background:rgba(201,162,39,.14);color:var(--gold2)">月结</span>')+
+        '<br><span style="font-size:12px;opacity:.7">'+esc(x.branch)+' · '+
+          (x.perOrder ? esc(x.orderId)+' · '+esc(x.date) : x.n+' 笔')+
+          ' · RM '+rm(x.amount)+'</span>'+
         (x.invNo?'<br><span style="font-size:11px;color:var(--ok)">已开 '+esc(x.invNo)+'</span>':'')+
         (x.voided?'<br><span style="font-size:11px;opacity:.5">已作废 '+x.voided+' 张</span>':'')+
         (x.hasAddr?'':'<br><span style="font-size:11px;color:var(--warn)">⚠ 还没填地址</span>')+
