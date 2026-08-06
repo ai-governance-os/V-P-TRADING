@@ -490,8 +490,11 @@ function renderOrder(){
      '<label class="lbl" style="color:var(--gold2)">发票上的牌子</label>'+
      '<div style="color:var(--dim2);font-size:12px;margin:-4px 0 10px">月尾开发票会照这里印</div>'+
      '<div class="chips" id="ivBrMain">'+ivBrChips()+'</div>'+
-     '<div class="hint" style="margin-top:10px">预设跟分行一样（'+esc(F.brand||'—')+'）。'+
-       '客人买的是别的牌子，点这里改就好 —— 不要写在下面的「特别交代」。</div>'+
+     // 新手提醒用过 15 笔就收起来，只留一行淡淡的预设说明
+     ((S.boot&&S.boot.showBrandHint)
+       ? '<div class="hint" style="margin-top:10px">预设跟分行一样（'+esc(F.brand||'—')+'）。'+
+           '客人买的是别的牌子，点这里改就好 —— 不要写在下面的「特别交代」。</div>'
+       : '<div style="color:var(--dim2);font-size:11.5px;margin-top:8px">预设跟分行一样（'+esc(F.brand||'—')+'）</div>')+
    '</div>'+
 
    '<div style="height:16px"></div>'+

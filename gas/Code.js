@@ -89,6 +89,37 @@ function readTailTable_(name, n) {
   return { head: head, rows: rows, headRow: hr + 1, sheet: sheet, truncated: take < total };
 }
 
+/**
+ * 数一数「有手动选过发票品牌」的订单笔数。
+ * 用来决定下单页那段新手提醒还要不要显示 —— 学会了就自己退场。
+ * 只读 INV_BRAND 那一栏，不整张搬（这支会在 bootstrap 里跑）。
+ */
+function invBrandUsedCount_() {
+  try {
+    var sheet = sh_('ORDERS');
+    var lastRow = sheet.getLastRow(), lastCol = sheet.getLastColumn();
+    if (lastRow < 2 || !lastCol) return 0;
+
+    var top = sheet.getRange(1, 1, Math.min(5, lastRow), lastCol).getValues();
+    var hr = -1, head = null;
+    for (var i = 0; i < top.length; i++) {
+      var ne = top[i].filter(function (x) { return x !== '' && x !== null; }).length;
+      if (ne >= 2) { hr = i; head = top[i].map(function (h) { return String(h).trim(); }); break; }
+    }
+    if (!head) return 0;
+
+    var c = head.indexOf('INV_BRAND');
+    if (c < 0) return 0;
+    var first = hr + 2, n = lastRow - first + 1;
+    if (n <= 0) return 0;
+
+    var v = sheet.getRange(first, c + 1, n, 1).getValues();
+    var used = 0;
+    for (var r = 0; r < v.length; r++) if (String(v[r][0]).trim()) used++;
+    return used;
+  } catch (e) { return 0; }
+}
+
 function toNum_(x) { var n = parseFloat(x); return isNaN(n) ? 0 : n; }
 function up_(x) { return String(x == null ? '' : x).trim().toUpperCase(); }
 
@@ -519,6 +550,8 @@ function buildBoot_() {
     driver: { name: String(drv.DRIVER_NAME || ''), phone: String(drv.PHONE || '').replace(/[^0-9]/g, ''), allowance: toNum_(drv.ALLOWANCE_PER_MONTH) },
     build: (typeof BUILD_ID === 'string' ? BUILD_ID : ''),
     brands: invBrandList_().slice().sort(),
+    // 新手提醒：手动选过 15 笔就当他们学会了，之後不再显示（不靠浏览器存档）
+    showBrandHint: invBrandUsedCount_() < 15,
     setTypes: setTypes,
     people: people,
     branches: branches
