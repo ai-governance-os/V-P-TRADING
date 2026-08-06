@@ -1357,7 +1357,7 @@ function drawInvList(){
         (x.hasAddr?'':'<br><span style="font-size:11px;color:var(--warn)">⚠ 还没填地址</span>')+
       '</span>'+
       '<span style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">'+
-        '<button class="chip" onclick="editBill(\''+esc(x.salesman).replace(/'/g,"\\'")+'\')">资料</button>'+
+        '<button class="chip" onclick="editBill(\''+esc(x.salesman).replace(/'/g,"\\'")+'\',\''+esc(x.branch).replace(/'/g,"\\'")+'\')">资料</button>'+
         (x.invNo?'<button class="chip" onclick="askVoidInv(\''+esc(x.invNo).replace(/'/g,"\\'")+'\')">作废</button>':'')+
         '<button class="chip on" onclick="dlInv(\''+esc(x.key).replace(/'/g,"\\'")+'\')">PDF</button>'+
       '</span></div>';
@@ -1418,9 +1418,41 @@ function billDraft(name){
     var e=document.getElementById(id); if(e)d[id]=e.value;
   });
 }
-function editBill(name){
-  call('getBillTo',[{salesman:name}]).then(function(r){
+var BILLBR='', BILLPO=false, BILLBRS=[];
+function pickBillPo(v){
+  BILLPO=!!v;
+  var e=document.getElementById('bPo'); if(e)e.innerHTML=billPoChips();
+}
+function billPoChips(){
+  return '<button class="chip'+(BILLPO?'':' on')+'" onclick="pickBillPo(0)">月结<small>一个月一张</small></button>'+
+         '<button class="chip'+(BILLPO?' on':'')+'" onclick="pickBillPo(1)">逐笔<small>一笔一张</small></button>';
+}
+/* 跨分行的人：先选要改哪一间，不然会改错间 */
+function billBrChips(){
+  return BILLBRS.map(function(b){
+    return '<button class="chip'+(BILLBR===b.branch?' on':'')+'" onclick="pickBillBr(\''+
+      esc(b.branch).replace(/'/g,"\\'")+'\')">'+esc(b.branch)+
+      (b.perOrder?'<small>逐笔</small>':'<small>月结</small>')+'</button>';
+  }).join('');
+}
+function pickBillBr(br){
+  BILLBR=br;
+  var f=null; BILLBRS.forEach(function(b){ if(b.branch===br) f=b; });
+  BILLPO=!!(f&&f.perOrder);
+  var e=document.getElementById('bBr'); if(e)e.innerHTML=billBrChips();
+  var p=document.getElementById('bPoWrap'); if(p)p.innerHTML=billPoBlock();
+}
+function billPoBlock(){
+  if(!BILLBR) return '<div class="hint" style="margin-bottom:16px">先选上面那间分行，才能设开票方式。</div>';
+  return '<label class="lbl">开票方式</label>'+
+    '<div class="chips" id="bPo" style="margin-bottom:6px">'+billPoChips()+'</div>'+
+    '<div class="hint" style="margin-bottom:16px">这一项<b>只影响 '+esc(BILLBR)+'</b> 这间分行。'+
+      '同一个人在别间分行照旧。<br>上面的抬头、地址、电话则是所有分行共用。</div>';
+}
+function editBill(name,branch){
+  call('getBillTo',[{salesman:name,branch:branch||''}]).then(function(r){
     if(!r.ok){toast(r.msg,'bad');return}
+    BILLBRS=r.branches||[]; BILLBR=r.branch||''; BILLPO=!!r.perOrder;
     var d=BILLDRAFT[name]||{};
     var v=function(id,fallback){ return d[id]!==undefined?d[id]:fallback };
     openSheet('<div style="font-family:var(--sf);font-size:25px;margin-bottom:3px">发票资料</div>'+
@@ -1433,12 +1465,17 @@ function editBill(name){
      '<input class="inp" id="bA" oninput="billDraft(\''+esc(name).replace(/'/g,"\\'")+'\')" placeholder="发票上印的地址" value="'+esc(v('bA',r.addr))+'" style="margin-bottom:12px">'+
      '<label class="lbl">电话</label>'+
      '<input class="inp" id="bP" oninput="billDraft(\''+esc(name).replace(/'/g,"\\'")+'\')" placeholder="选填" value="'+esc(v('bP',r.tel))+'" style="margin-bottom:16px">'+
+     (BILLBRS.length>1
+       ? '<label class="lbl">这个人有 '+BILLBRS.length+' 间分行 —— 要改哪一间？</label>'+
+         '<div class="chips" id="bBr" style="margin-bottom:14px">'+billBrChips()+'</div>'
+       : '')+
+     '<div id="bPoWrap">'+(BILLBRS.length?billPoBlock():'')+'</div>'+
      '<button class="btn p" onclick="saveBill(\''+esc(name).replace(/'/g,"\\'")+'\')">储存</button>'+
      '<div style="height:9px"></div><button class="btn o" onclick="drawInvList()">返回</button>');
   }).catch(function(e){toast(String(e.message||e),'bad')});
 }
 function saveBill(name){
-  call('saveBillTo',[{salesman:name,
+  call('saveBillTo',[{salesman:name,branch:BILLBR,perOrder:BILLPO,
     title:document.getElementById('bT').value,company:document.getElementById('bC').value,
     addr:document.getElementById('bA').value,tel:document.getElementById('bP').value}])
   .then(function(r){

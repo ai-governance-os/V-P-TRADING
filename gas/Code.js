@@ -1992,10 +1992,12 @@ function perOrderSet_(t) {
   var set = {};
   t.rows.forEach(function (r) {
     var v = String(r['发票方式'] || '').trim();
-    if (/逐笔|逐筆|PER.?ORDER|EACH/i.test(v)) set[up_(r.SALESMAN)] = 1;
+    // 键是「销售员＋分行」—— 同一个人可能这间分行要逐笔、另一间照样月结
+    if (/逐笔|逐筆|PER.?ORDER|EACH/i.test(v)) set[poKey_(r.SALESMAN, r.BRANCH)] = 1;
   });
   return set;
 }
+function poKey_(salesman, branch) { return up_(salesman) + '@' + up_(branch); }
 
 /** 销售员那几栏发票资料。
     t 可以从外面传进来 —— 不传的话每呼叫一次就重读整张 SALESMAN 表，
@@ -2105,7 +2107,7 @@ function listInvoiceMonth(p) {
     var mode = up_(r.INVOICE_TO) === 'COMPANY' ? 'COMPANY' : 'SA';
     // 这个月如果已经用「月结」开过发票了，就维持月结 ——
     // 不然同一笔生意会再拿一个新号码，变成开了两张。已经开出去的不动。
-    var po = !!perOrder[up_(r.SALESMAN)] && !issued[up_(custKey_(r))];
+    var po = !!perOrder[poKey_(r.SALESMAN, r.BRANCH)] && !issued[up_(custKey_(r))];
     var key = custKey_(r, po);
     if (!g[key]) {
       var b = billTo_(r.SALESMAN, mode, smT);
@@ -2319,17 +2321,28 @@ function makeInvoicePdf(p) {
 function saveBillTo(p) {
   var name = normName_(p && p.salesman);
   if (!name) return { ok: false, msg: '请选销售员' };
-  var t = ensureCols_('SALESMAN', ['发票抬头', '公司名', '地址', '电话']);
+  var branch = String(p.branch || '').trim();
+  var t = ensureCols_('SALESMAN', ['发票抬头', '公司名', '地址', '电话', '发票方式']);
   var rows = t.rows.filter(function (r) { return normName_(r.SALESMAN) === name; });
   if (!rows.length) return { ok: false, msg: '名单里没有这个人' };
 
   var map = { '发票抬头': (p.title || '').trim(), '公司名': (p.company || '').trim(),
               '地址': (p.addr || '').trim(), '电话': (p.tel || '').trim() };
+  // 发票方式只写「这一间分行」那行 —— 同一个人别间分行不受影响
+  var brRows = branch
+    ? rows.filter(function (r) { return up_(r.BRANCH) === up_(branch); })
+    : [];
   var res = withLock_(function () {
     Object.keys(map).forEach(function (k) {
       var c = t.head.indexOf(k) + 1;
       if (c > 0) rows.forEach(function (r) { t.sheet.getRange(r.__row, c).setValue(map[k]); });
     });
+    if (p.perOrder !== undefined && brRows.length) {
+      var cm = t.head.indexOf('发票方式') + 1;
+      if (cm > 0) brRows.forEach(function (r) {
+        t.sheet.getRange(r.__row, cm).setValue(p.perOrder ? '逐笔' : '');
+      });
+    }
     return { ok: true };
   });
   if (!res.ok) return res;
@@ -2339,11 +2352,27 @@ function saveBillTo(p) {
 
 function getBillTo(p) {
   var name = normName_(p && p.salesman);
-  var t = ensureCols_('SALESMAN', ['发票抬头', '公司名', '地址', '电话']);
-  var hit = null;
-  t.rows.forEach(function (r) { if (!hit && normName_(r.SALESMAN) === name) hit = r; });
+  var branch = String((p && p.branch) || '').trim();
+  var t = ensureCols_('SALESMAN', ['发票抬头', '公司名', '地址', '电话', '发票方式']);
+  var hit = null, brHit = null, branches = [];
+  var isPo = function (r) {
+    return /逐笔|逐筆|PER.?ORDER|EACH/i.test(String(r['发票方式'] || '').trim());
+  };
+  t.rows.forEach(function (r) {
+    if (normName_(r.SALESMAN) !== name) return;
+    if (!hit) hit = r;
+    // 抬头／地址是「人」的，分行只影响「发票方式」
+    if (branch && !brHit && up_(r.BRANCH) === up_(branch)) brHit = r;
+    var bn = String(r.BRANCH || '').trim();
+    if (bn) branches.push({ branch: bn, perOrder: isPo(r) });
+  });
   if (!hit) return { ok: false, msg: '名单里没有这个人' };
+  // 跨分行的人，前端要让他们自己挑要改哪一间 —— 不能从卡片猜，会改错间
+  var row = brHit || (branches.length === 1 ? hit : null);
   return { ok: true, salesman: name,
+    branches: branches,
+    branch: row ? String(row.BRANCH || '') : '',
+    perOrder: row ? isPo(row) : false,
     title: String(hit['发票抬头'] || ''), company: String(hit['公司名'] || ''),
     addr: String(hit['地址'] || ''), tel: String(hit['电话'] || '') };
 }
