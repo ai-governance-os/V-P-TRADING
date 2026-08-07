@@ -248,6 +248,7 @@ var PAGE_BUILD='<?= (typeof BUILD_ID === "string" ? BUILD_ID : "") ?>';
 var S={user:null,boot:null,view:'order',sel:{},dash:null,orders:[],month:0,bill:null,billMonth:0};
 var F={ // 表单
   salesman:'',branch:'',brand:'',state:'',region:'',setType:'',price:0,profit:0,qty:1,
+  date:'',dateOpen:false,   // date 空 = 今天。dateOpen 只管有没有把日期栏打开，补以前漏掉的单才需要开。
   paid:false,payMethod:'OP',payDate:'',payNote:'',
   drvColor:'',drvGrade:'',drvNote:'',drvDesc:'',
   note:'',ovTotal:'',ovMine:'',ovFee:'',invoiceTo:'SA',invBrand:''
@@ -477,6 +478,31 @@ function go(v,keep){
 function boss(){return S.user.role==='admin'||S.user.role==='partner'}
 
 /* ================= 下单 ================= */
+/** 订单日期：平常不用管，默认今天，不占版面。
+    要补以前漏掉的单才点开改 —— 选了不是今天的日期就很显眼（黄色），
+    免得改完忘记关掉，下一笔正常的单也悄悄算错月份。 */
+function orderDateBlock(){
+  if(!F.dateOpen){
+    return '<div style="display:flex;align-items:center;justify-content:space-between;'+
+      'margin:-4px 0 14px;padding:0 2px">'+
+      '<span style="font-size:12.5px;color:var(--dim2)">订单日期：今天</span>'+
+      '<button class="addlink" style="margin:0" onclick="F.dateOpen=true;renderOrder()">补以前的单？改日期</button>'+
+    '</div>';
+  }
+  var cur=F.date||today(), back=cur!==today();
+  return '<div class="card" style="padding:13px 16px;margin-bottom:14px'+
+    (back?';background:rgba(233,168,53,.10);border-color:rgba(233,168,53,.34)':'')+'">'+
+    '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px">'+
+      '<label class="lbl"'+(back?' style="color:var(--warn);margin:0"':' style="margin:0"')+'>订单日期'+(back?'（补单）':'')+'</label>'+
+      '<button class="addlink" style="margin:0" onclick="F.date=\'\';F.dateOpen=false;renderOrder()">改回今天</button>'+
+    '</div>'+
+    '<input class="inp" type="date" max="'+today()+'" value="'+esc(cur)+'" '+
+      'onchange="F.date=this.value;renderOrder()" style="margin-top:9px">'+
+    (back?'<div class="hint" style="margin-top:9px;background:transparent;border:none;padding:0;color:var(--warn)">'+
+      '这笔会算进 '+cur.slice(0,4)+'年'+esc(MONTHS[parseInt(cur.slice(5,7),10)]||'')+
+      ' 的报表和抽成，不是这个月。</div>':'')+
+  '</div>';
+}
 function renderOrder(){
   var b=S.boot;
   var types=Object.keys(b.setTypes);
@@ -487,6 +513,8 @@ function renderOrder(){
 
   document.getElementById('v-order').innerHTML=
   '<div class="h1">新订单</div><div class="h1s">New Order</div>'+
+
+  orderDateBlock()+
 
   '<div class="card"><label class="lbl">销售员</label>'+
    '<div class="ac"><input class="inp" id="smq" placeholder="输入名字…" autocomplete="off" '+
@@ -787,7 +815,7 @@ function advSave(){
 function submit(){
   var btn=document.querySelector('.btn.p');btn.setAttribute('disabled','');btn.textContent='处理中…';
   call('submitOrder',[{salesman:F.salesman,branch:F.branch,brand:F.brand,state:F.state,region:F.region,
-    setType:F.setType,price:F.price,profitPerSet:F.profit,qty:F.qty,note:F.note,
+    setType:F.setType,price:F.price,profitPerSet:F.profit,qty:F.qty,note:F.note,date:F.date||today(),
     payStatus:F.paid?'PAID':'UNPAID',payMethod:F.payMethod,payDate:F.payDate||today(),payNote:F.payNote,
     drvColor:F.drvColor,drvGrade:F.drvGrade||F.drvDesc,drvNote:F.drvNote,
     totalOverride:F.ovTotal,myIncomeOverride:F.ovMine,driverFeeOverride:F.ovFee,
@@ -797,7 +825,7 @@ function submit(){
     if(!r.ok){toast(r.msg,'bad');return}
     successSheet(r.order,r.wa);
     F.setType='';F.price=0;F.profit=0;F.qty=1;F.ovTotal='';F.ovMine='';F.ovFee='';F.note='';F.invBrand='';
-    F.salesman='';F.branch='';F.state='';F.region='';F.brand='';
+    F.salesman='';F.branch='';F.state='';F.region='';F.brand='';F.date='';F.dateOpen=false;   // 补单改过的日期，每次提交後归零，免得忘记关掉
     F.paid=false;F.payMethod='OP';F.payDate='';F.payNote='';
     F.drvGrade='';F.drvNote='';F.drvDesc='';   // 颜色留着，下一单多半一样
     renderOrder();
