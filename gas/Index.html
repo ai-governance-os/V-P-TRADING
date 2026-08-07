@@ -1306,7 +1306,11 @@ function nameRows(){
   out.sort(function(a,b){ return a.branch<b.branch?-1:a.branch>b.branch?1:(a.name<b.name?-1:1) });
   return out;
 }
-function nameFilter(v){ NQ=(v||'').trim().toUpperCase(); drawNames() }
+/* 搜寻框每打一个字都全页重画的话，输入框自己也被重建一次，
+   手机上就是「打一个字、跳一下、要重新点才能打下一个字」。
+   改成：外壳（含输入框）只画一次，打字只重画下面的名单那块 <div id="namesResults">，
+   输入框那个 DOM 节点从头到尾没被换掉，光标跟焦点才不会掉。 */
+function nameFilter(v){ NQ=(v||'').trim().toUpperCase(); updateNamesResults(); }
 function openNames(){
   NQ='';
   // 每次点开都重拿 —— 他们刚改完地址电话，马上就看得到
@@ -1317,7 +1321,7 @@ function openNames(){
     NROWS=r.rows||[]; drawNames();
   }).catch(function(e){toast(String(e.message||e),'bad');closeSheet()});
 }
-function drawNames(){
+function namesResultsHtml(){
   var all=nameRows();
   var rows=NQ?all.filter(function(r){
     return (r.name+' '+r.branch+' '+r.brand+' '+r.state+' '+r.region).toUpperCase().indexOf(NQ)>=0;
@@ -1360,12 +1364,22 @@ function drawNames(){
     '</div>';
   });
 
-  openSheet('<div style="font-family:var(--sf);font-size:25px;margin-bottom:3px">客户名单</div>'+
-   '<div class="h1s" style="margin-bottom:14px">'+Object.keys(brSet).length+' 间分行 · '+
+  return '<div class="h1s" style="margin-bottom:14px">'+Object.keys(brSet).length+' 间分行 · '+
      Object.keys(nameSet).length+' 个销售员 · '+Object.keys(bdSet).length+' 个牌子 · '+
      Object.keys(stSet).length+' 个州</div>'+
-   '<input class="inp" placeholder="搜寻 名字 / 分行 / 牌子 / 州…" value="'+esc(NQ)+'" '+
-     'oninput="nameFilter(this.value)" style="margin-bottom:8px">'+
+   (rows.length
+     ? body+'<div style="height:14px"></div>'+
+       '<div style="text-align:center;color:var(--dim2);font-size:12px">以上 '+rows.length+' 笔</div>'
+     : '<div class="hint">找不到</div>');
+}
+function updateNamesResults(){
+  var el=document.getElementById('namesResults');
+  if(el) el.innerHTML=namesResultsHtml();
+}
+function drawNames(){
+  openSheet('<div style="font-family:var(--sf);font-size:25px;margin-bottom:3px">客户名单</div>'+
+   '<input class="inp" id="namesSearch" placeholder="搜寻 名字 / 分行 / 牌子 / 州…" value="'+esc(NQ)+'" '+
+     'oninput="nameFilter(this.value)" style="margin-bottom:8px;margin-top:11px">'+
    '<div style="display:flex;gap:7px;margin-bottom:10px">'+
      '<button class="btn o" style="flex:1;padding:10px;font-size:13px" onclick="dlNames()">下载成 Excel</button>'+
      '<button class="btn o" style="flex:1;padding:10px;font-size:13px" onclick="closeSheet()">关闭</button>'+
@@ -1373,12 +1387,9 @@ function drawNames(){
    '<div class="hint" style="margin-bottom:12px">'+
      '「累计 N 笔」是<b>从头到现在的总数</b>，不是这个月。<br>'+
      '★ 只有跨分行的人才有，标的是他最常下单那间。</div>'+
-   (rows.length
-     ? body+'<div style="height:14px"></div>'+
-       '<div style="text-align:center;color:var(--dim2);font-size:12px">以上 '+rows.length+' 笔</div>'+
-       '<div style="height:14px"></div>'+
-       '<button class="btn o" onclick="closeSheet()">关闭</button>'
-     : '<div class="hint">找不到</div>'));
+   '<div id="namesResults">'+namesResultsHtml()+'</div>'+
+   '<div style="height:14px"></div>'+
+   '<button class="btn o" onclick="closeSheet()">关闭</button>');
 }
 function dlNames(){
   var rows=nameRows();
