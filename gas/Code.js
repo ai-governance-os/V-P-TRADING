@@ -94,6 +94,25 @@ function readTailTable_(name, n) {
  * 用来决定下单页那段新手提醒还要不要显示 —— 学会了就自己退场。
  * 只读 INV_BRAND 那一栏，不整张搬（这支会在 bootstrap 里跑）。
  */
+/**
+ * 新手提醒还要不要显示。
+ *
+ * 「学会了」是不可逆的 —— 用过 15 笔就永远不必再数。
+ * 所以一旦达标就把结论记进 PropertiesService，之後直接回 false，
+ * 不再扫那一千多行订单。bootstrap 每次存设定都会重算，这里不能省着不做。
+ */
+function brandHintOn_() {
+  try {
+    var props = PropertiesService.getScriptProperties();
+    if (props.getProperty('BRAND_HINT_DONE') === '1') return false;
+    if (invBrandUsedCount_() >= 15) {
+      props.setProperty('BRAND_HINT_DONE', '1');
+      return false;
+    }
+    return true;
+  } catch (e) { return true; }
+}
+
 function invBrandUsedCount_() {
   try {
     var sheet = sh_('ORDERS');
@@ -551,7 +570,7 @@ function buildBoot_() {
     build: (typeof BUILD_ID === 'string' ? BUILD_ID : ''),
     brands: invBrandList_().slice().sort(),
     // 新手提醒：手动选过 15 笔就当他们学会了，之後不再显示（不靠浏览器存档）
-    showBrandHint: invBrandUsedCount_() < 15,
+    showBrandHint: brandHintOn_(),
     setTypes: setTypes,
     people: people,
     branches: branches
