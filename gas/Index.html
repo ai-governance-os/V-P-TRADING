@@ -298,8 +298,19 @@ function toast(m,t){var e=document.getElementById('toast');
   clearTimeout(e._t);
   e._t=setTimeout(function(){ e.className='toast '+(t||'') },2600);
 }
-function openSheet(h){hideToast();document.getElementById('sheetBody').innerHTML=h;
-  document.getElementById('sheet').className='sheet on'}
+/* 手机返回键：本来会整个退出 app（等于登出）。
+   开弹窗时塞一笔历史，返回键就只是关掉弹窗。
+   注意 openSheet 会被重复呼叫（例如名单搜寻每打一个字就重画），
+   所以只有「从关到开」那一次才塞，不然打十个字就塞十笔历史。 */
+var SHEETNAV=0;
+function openSheet(h){
+  hideToast();
+  document.getElementById('sheetBody').innerHTML=h;
+  var s=document.getElementById('sheet');
+  var wasOpen=s.className.indexOf('on')>=0;
+  s.className='sheet on';
+  if(!wasOpen){ try{ history.pushState({vpSheet:1},''); SHEETNAV++; }catch(e){} }
+}
 /** 弹窗里有没有正在填的东西 */
 function sheetDirty(){
   var b=document.getElementById('sheetBody'); if(!b)return false;
@@ -317,11 +328,21 @@ function bdClose(){
   if(sheetDirty()){ toast('填好按储存，或按取消','bad'); return }
   closeSheet();
 }
-function closeSheet(){var s=document.getElementById('sheet');
+function closeSheet(){
+  // 有塞过历史就走返回，让 popstate 收尾 —— 这样历史不会越堆越多
+  if(SHEETNAV>0){ try{ history.back(); return; }catch(e){} }
+  closeSheetNow();
+}
+function closeSheetNow(){var s=document.getElementById('sheet');
   if(!s)return; s.className='sheet';
   // 收起后清空内容，避免旧的弹窗残留
   setTimeout(function(){ if(s.className==='sheet'){var b=document.getElementById('sheetBody'); if(b)b.innerHTML=''} },400);
 }
+window.addEventListener('popstate',function(){
+  if(SHEETNAV>0) SHEETNAV--;
+  var s=document.getElementById('sheet');
+  if(s&&s.className.indexOf('on')>=0) closeSheetNow();
+});
 /* 保险：碰到画面任何地方就把通知收掉；返回键 / Esc 关弹窗 */
 document.addEventListener('pointerdown',function(){hideToast()},true);
 document.addEventListener('keydown',function(e){ if(e.key==='Escape'){hideToast();bdClose()} });
