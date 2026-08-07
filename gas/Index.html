@@ -703,9 +703,22 @@ function drawNewSalesman(){
         return '<button class="chip'+(NB.state===st?' on':'')+'" onclick="NB.state=\''+st+'\';drawNewSalesman()">'+st+'</button>'}).join('')+'</div>'+
      '<div style="color:var(--dim2);font-size:12px;margin-top:10px">Selangor / NS 算中马（司机有抽成）；Johor / Melaka 算南马（无抽成）。</div>'
    ))+
+   nbNameWarning()+
    '<div style="height:20px"></div>'+
    '<button class="btn p" onclick="saveSalesman()">建立并选用</button>'+
    '<div style="height:9px"></div><button class="btn o" onclick="closeSheet()">取消</button>');
+}
+/** 打的名字名单里已经有了，而且这次选的分行州属跟他现有的对不上 ——
+    很可能是刚好同名的另一个人，不是同一个人多开一间分行。先提醒，免得後面又要拆。 */
+function nbNameWarning(){
+  var name=(NB.name||'').trim().toUpperCase().replace(/\s+/g,' ');
+  var existing=name&&S.boot.people[name];
+  if(!existing||!existing.length||!NB.state)return '';
+  if(existing.some(function(x){return x.state===NB.state}))return '';
+  return '<div class="hint" style="margin-top:14px;background:rgba(233,168,53,.10);border-color:rgba(233,168,53,.34);color:var(--warn)">'+
+    '⚠ 名单里已经有「'+esc(name)+'」了，在 '+esc(existing.map(function(x){return x.branch}).join('、'))+
+    '（'+esc(existing[0].state||'')+'）。<br>这次选的分行州属不一样 —— 是同一个人跨州，还是刚好同名的另一个人？'+
+    '<br>如果只是刚好同名，建议现在就打不一样的名字（比如加个小标记），以後比较不会混在一起、要再拆开麻烦。</div>';
 }
 function nbMode(m){NB.mode=m;drawNewSalesman()}
 function nbOptions(list){
@@ -1944,8 +1957,8 @@ function renderSettings(){
    '</div>';
 }
 /* --- 改销售员名字 --- */
-var RN={from:'',to:'',q:'',pv:null};
-function askRen(){ RN={from:'',to:'',q:'',pv:null}; drawRen() }
+var RN={from:'',to:'',q:'',pv:null,mode:'',branch:''};
+function askRen(){ RN={from:'',to:'',q:'',pv:null,mode:'',branch:''}; drawRen() }
 function renList(){
   var q=mgNorm(RN.q);
   var names=Object.keys(S.boot.people||{});
@@ -1971,45 +1984,75 @@ function drawRen(){
    '<div style="height:12px"></div><button class="btn o" onclick="closeSheet()">取消</button>');
 }
 function refreshRen(){ var e=document.getElementById('rnL'); if(e)e.innerHTML=renList() }
-function pickRen(n){ RN.from=n; refreshRen(); renPreview() }
+function pickRen(n){ RN.from=n; RN.mode=''; RN.branch=''; refreshRen(); renPreview() }
 var RNT=null;
 function renPreview(){
   var pv=document.getElementById('rnPv'); if(!pv)return;
   if(!RN.from||mgNorm(RN.to).length<2){pv.innerHTML='';return}
   clearTimeout(RNT);
   RNT=setTimeout(function(){
-    call('previewRenameSalesman',[{from:RN.from,to:RN.to}]).then(function(r){
+    call('previewRenameSalesman',[{from:RN.from,to:RN.to,branch:RN.mode==='branch'?RN.branch:''}]).then(function(r){
       if(!r.ok){pv.innerHTML='<div class="hint" style="color:var(--bad)">'+esc(r.msg)+'</div>';return}
       RN.pv=r;
-      pv.innerHTML='<div class="card" style="margin-top:16px;background:rgba(233,168,53,.10);border-color:rgba(233,168,53,.34)">'+
-        '<label class="lbl" style="color:var(--warn)">按下去会发生什么</label>'+
-        '<div class="sumrow"><span class="k">'+esc(r.from)+' 的订单</span><span class="v" style="font-size:16px">'+r.orders+' 笔</span></div>'+
-        '<div class="sumrow"><span class="k">全部改成</span><span class="v" style="font-size:15px;color:var(--ok)">'+esc(r.to)+'</span></div>'+
-        (r.branches&&r.branches.length
-          ?'<div class="sumrow"><span class="k">涉及分行</span><span class="v" style="font-size:13px">'+esc(r.branches.join('、'))+'</span></div>':'')+
-        '<div class="sumrow"><span class="k">金额与抽成</span><span class="v" style="font-size:15px">完全不动</span></div>'+
-        (r.merge
-          ?'<div class="hint" style="margin-top:10px;background:rgba(233,168,53,.13);border-color:rgba(233,168,53,.45);color:var(--warn)">'+
-             '「'+esc(r.to)+'」已经存在 —— 这会把两个名字并成同一个人。</div>':'')+
-        ((r.near&&r.near.length)
-          ?'<div class="hint" style="margin-top:10px;background:rgba(233,168,53,.13);border-color:rgba(233,168,53,.45);color:var(--warn)">'+
-             '⚠ 名单里有很像的：'+r.near.map(function(x){return '<b>'+esc(x)+'</b>'}).join('、')+
-             '<br>确定不是要选这个吗？</div>':'')+
-        '<div class="hint" style="margin-top:10px">改错了再改回来就好，这个动作可以复原。</div>'+
-        '<div style="height:14px"></div>'+
-        '<button class="btn p" onclick="doRen()">'+(r.merge?'确定合并成同一个人':'确定改名')+'</button>'+
-      '</div>';
+      if(r.branches&&r.branches.length>1&&!RN.mode){ pv.innerHTML=renSplitAsk(r); return; }
+      pv.innerHTML=renConfirmBlock(r);
     }).catch(function(e){pv.innerHTML='<div class="hint" style="color:var(--bad)">'+esc(String(e.message||e))+'</div>'});
   },350);
 }
+function renSplitAsk(r){
+  return '<div class="card" style="margin-top:16px;background:rgba(233,168,53,.10);border-color:rgba(233,168,53,.34)">'+
+    '<label class="lbl" style="color:var(--warn)">「'+esc(r.from)+'」在 '+r.branches.length+' 间分行都有单</label>'+
+    '<div style="color:var(--dim);font-size:13px;line-height:1.7;margin:6px 0 14px">'+esc(r.branches.join('、'))+
+      '<br><br>这是<b style="color:var(--fg)">同一个人</b>跨分行下单，还是<b style="color:var(--fg)">刚好同名</b>的两个人？</div>'+
+    '<button class="btn p" style="margin-bottom:9px" onclick="RN.mode=\'all\';renPreview()">同一个人 —— 全部分行一起改</button>'+
+    '<button class="btn o" onclick="renAskBranch()">刚好同名 —— 只改其中一间</button>'+
+  '</div>';
+}
+function renAskBranch(){
+  RN.mode='branch'; RN.branch='';
+  var pv=document.getElementById('rnPv'), r=RN.pv; if(!pv||!r)return;
+  pv.innerHTML='<div class="card" style="margin-top:16px">'+
+    '<label class="lbl">是哪一间分行的「'+esc(r.from)+'」？</label>'+
+    '<div class="chips" style="margin-top:10px">'+
+      r.branches.map(function(b){return '<button class="chip" onclick="RN.branch=\''+
+        esc(b).replace(/'/g,"\\'")+'\';renPreview()">'+esc(b)+'</button>'}).join('')+
+    '</div>'+
+    '<div style="height:10px"></div><button class="addlink" onclick="RN.mode=\'\';renPreview()">‹ 上一步</button>'+
+  '</div>';
+}
+function renConfirmBlock(r){
+  var scoped=r.branch;
+  return '<div class="card" style="margin-top:16px;background:rgba(233,168,53,.10);border-color:rgba(233,168,53,.34)">'+
+    '<label class="lbl" style="color:var(--warn)">按下去会发生什么</label>'+
+    (scoped
+      ?'<div class="sumrow"><span class="k">只改 '+esc(scoped)+'</span><span class="v" style="font-size:16px">'+r.orders+' 笔</span></div>'+
+       '<div class="sumrow"><span class="k">其他分行</span><span class="v" style="font-size:13px;color:var(--dim)">完全不动</span></div>'
+      :'<div class="sumrow"><span class="k">'+esc(r.from)+' 的订单</span><span class="v" style="font-size:16px">'+r.orders+' 笔</span></div>'+
+       (r.branches&&r.branches.length?'<div class="sumrow"><span class="k">涉及分行</span><span class="v" style="font-size:13px">'+esc(r.branches.join('、'))+'</span></div>':''))+
+    '<div class="sumrow"><span class="k">改成</span><span class="v" style="font-size:15px;color:var(--ok)">'+esc(r.to)+'</span></div>'+
+    '<div class="sumrow"><span class="k">金额与抽成</span><span class="v" style="font-size:15px">完全不动</span></div>'+
+    (r.merge
+      ?'<div class="hint" style="margin-top:10px;background:rgba(233,168,53,.13);border-color:rgba(233,168,53,.45);color:var(--warn)">'+
+         '「'+esc(r.to)+'」已经存在 —— 这会把两个名字并成同一个人，<b>合并之后没办法拆开</b>。</div>'
+      :'<div class="hint" style="margin-top:10px">改错了再改回来就好，这个动作可以复原。</div>')+
+    ((r.near&&r.near.length)
+      ?'<div class="hint" style="margin-top:10px;background:rgba(233,168,53,.13);border-color:rgba(233,168,53,.45);color:var(--warn)">'+
+         '⚠ 名单里有很像的：'+r.near.map(function(x){return '<b>'+esc(x)+'</b>'}).join('、')+
+         '<br>确定不是要选这个吗？</div>':'')+
+    '<div style="height:14px"></div>'+
+    (RN.mode==='branch'?'<button class="addlink" style="margin-bottom:9px" onclick="renAskBranch()">‹ 改选分行</button>':'')+
+    '<button class="btn p" onclick="doRen()">'+(r.merge?'确定合并成同一个人':(scoped?'确定只改这一间':'确定改名'))+'</button>'+
+  '</div>';
+}
 function doRen(){
   if(!RN.from||!RN.to){toast('两边都要填','bad');return}
+  if(RN.mode==='branch'&&!RN.branch){toast('先选是哪一间分行','bad');return}
   openSheet('<div class="load"><div class="spin"></div></div>'+
     '<div style="text-align:center;color:var(--dim);font-size:14px">改名中…</div>');
-  call('renameSalesman',[{from:RN.from,to:RN.to,by:(S.user||{}).name||''}]).then(function(r){
+  call('renameSalesman',[{from:RN.from,to:RN.to,branch:RN.mode==='branch'?RN.branch:'',by:(S.user||{}).name||''}]).then(function(r){
     if(!r.ok){toast(r.msg,'bad');closeSheet();return}
     closeSheet();
-    toast(r.orders+' 笔已改成 '+r.to,'ok');
+    toast(r.orders+' 笔已改成 '+r.to+(r.branch?'（只有 '+r.branch+'）':''),'ok');
     S.boot=null;S.dash=null;S.orders=[];
     call('bootstrap',[]).then(function(b){S.boot=b;loadSettings()}).catch(function(){loadSettings()});
   }).catch(function(e){toast(String(e.message||e),'bad')});

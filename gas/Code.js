@@ -1593,25 +1593,31 @@ function normName_(x) {
 
 function previewRenameSalesman(p) {
   var from = normName_(p && p.from), to = normName_(p && p.to);
+  var branch = p && p.branch ? up_(p.branch) : '';
   if (!from || !to) return { ok: false, msg: '请填两个名字' };
   if (from === to) return { ok: false, msg: '两个是同一个名字' };
   if (to.length < 2) return { ok: false, msg: '名字太短' };
 
   var st = readTable_('SALESMAN');
-  var fromRows = st.rows.filter(function (r) { return normName_(r.SALESMAN) === from; });
+  var fromRows = st.rows.filter(function (r) {
+    return normName_(r.SALESMAN) === from && (!branch || up_(r.BRANCH) === branch);
+  });
   var toRows = st.rows.filter(function (r) { return normName_(r.SALESMAN) === to; });
 
   var t = readTable_('ORDERS');
   var n = 0, branches = {};
   t.rows.forEach(function (r) {
     if (normName_(r.SALESMAN) !== from || isVoid_(r)) return;
-    n++; branches[String(r.BRANCH || '')] = 1;
+    branches[String(r.BRANCH || '')] = 1;
+    if (branch && up_(r.BRANCH) !== branch) return;
+    n++;
   });
 
   if (!n && !fromRows.length)
-    return { ok: false, msg: '名单里没有「' + from + '」，也没有任何订单用这个名字' };
+    return { ok: false, msg: branch
+      ? '「' + from + '」在 ' + branch + ' 没有单，也没有名单资料'
+      : '名单里没有「' + from + '」，也没有任何订单用这个名字' };
 
-  // 打错字防护：新名字跟现有某个销售员很像但不一样
   var near = [];
   if (!toRows.length) {
     var seen = {};
@@ -1627,8 +1633,9 @@ function previewRenameSalesman(p) {
   return {
     ok: true, from: from, to: to, orders: n,
     rows: fromRows.length,
-    merge: toRows.length > 0,            // 目标已存在 → 是合并成同一个人
+    merge: toRows.length > 0,
     branches: Object.keys(branches).sort(),
+    branch: branch,
     near: near
   };
 }
@@ -1636,20 +1643,22 @@ function previewRenameSalesman(p) {
 function renameSalesman(p) {
   var pv = previewRenameSalesman(p);
   if (!pv.ok) return pv;
-  var from = pv.from, to = pv.to;
+  var from = pv.from, to = pv.to, branch = pv.branch;
 
   var res = withLock_(function () {
-    // 1) 订单
     var t = readTable_('ORDERS');
     var c = t.head.indexOf('SALESMAN') + 1;
+    var cb = t.head.indexOf('BRANCH') + 1;
     if (c > 0) {
       t.rows.forEach(function (r) {
-        if (normName_(r.SALESMAN) === from) t.sheet.getRange(r.__row, c).setValue(to);
+        if (normName_(r.SALESMAN) !== from) return;
+        if (branch && (cb <= 0 || up_(r.BRANCH) !== branch)) return;
+        t.sheet.getRange(r.__row, c).setValue(to);
       });
     }
-    // 2) 销售员名单：改名；若目标在同一间分行已存在，旧的那行删掉
     var st = readTable_('SALESMAN');
     var sc = st.head.indexOf('SALESMAN') + 1;
+    var scb = st.head.indexOf('BRANCH') + 1;
     var have = {};
     st.rows.forEach(function (r) {
       if (normName_(r.SALESMAN) === to) have[up_(r.BRANCH)] = 1;
@@ -1657,6 +1666,7 @@ function renameSalesman(p) {
     var kill = [];
     st.rows.forEach(function (r) {
       if (normName_(r.SALESMAN) !== from) return;
+      if (branch && (scb <= 0 || up_(r.BRANCH) !== branch)) return;
       if (have[up_(r.BRANCH)]) kill.push(r.__row);
       else if (sc > 0) st.sheet.getRange(r.__row, sc).setValue(to);
     });
@@ -1666,9 +1676,9 @@ function renameSalesman(p) {
   if (!res.ok) return res;
 
   clearBootCache_();
-  logChange_({ kind: '销售员', action: pv.merge ? '合并' : '改名', from: from, to: to,
-               orders: pv.orders, rows: pv.rows, by: (p && p.by) || '' });
-  return { ok: true, from: from, to: to, orders: pv.orders, rows: pv.rows, merge: pv.merge };
+  logChange_({ kind: '销售员', action: pv.merge ? '合并' : (branch ? '拆分改名' : '改名'), from: from, to: to,
+               orders: pv.orders, rows: pv.rows, branch: branch || '', by: (p && p.by) || '' });
+  return { ok: true, from: from, to: to, orders: pv.orders, rows: pv.rows, merge: pv.merge, branch: branch || '' };
 }
 
 /* ═════════ 价目表维护 ═════════ */
