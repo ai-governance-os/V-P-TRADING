@@ -2369,6 +2369,36 @@ function saveBillTo(p) {
   return { ok: true, salesman: name };
 }
 
+/**
+ * 客户名单：分行、销售员、地址、电话，全部从 SALESMAN 表现读。
+ *
+ * 不放进 bootstrap —— 三百多个地址会让每次开 app 都多背几十 KB。
+ * 改成点开名单才呼叫，读一次三百行很快，而且他们改完地址马上就看得到。
+ */
+function getNameList() {
+  var t = ensureCols_('SALESMAN', ['发票抬头', '公司名', '地址', '电话', '发票方式']);
+  var out = [];
+  t.rows.forEach(function (r) {
+    var n = String(r.SALESMAN || '').trim();
+    if (!n) return;
+    out.push({
+      name: n,
+      branch: String(r.BRANCH || '').trim(),
+      brand: String(r.BRAND || '').trim(),
+      state: String(r.STATE || '').trim(),
+      region: String(r.REGION || '').trim(),
+      n: toNum_(r['历史笔数']),
+      primary: String(r['主要分行'] || '').indexOf('★') >= 0,
+      title: String(r['发票抬头'] || '').trim(),
+      company: String(r['公司名'] || '').trim(),
+      addr: String(r['地址'] || '').trim(),
+      tel: String(r['电话'] || '').trim(),
+      perOrder: /逐笔|逐筆|PER.?ORDER|EACH/i.test(String(r['发票方式'] || '').trim())
+    });
+  });
+  return { ok: true, rows: out };
+}
+
 function getBillTo(p) {
   var name = normName_(p && p.salesman);
   var branch = String((p && p.branch) || '').trim();
