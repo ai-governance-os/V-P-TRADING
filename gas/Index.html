@@ -405,20 +405,13 @@ function doLogin(){
 }
 /* 手机把整个页面快取住时，画面会停在旧版本 —— 後端已经更新了他还是看不到。
    页面载入时烘进来的版本号，跟後端现在的版本号一比就知道。 */
-/* App 跑在 Apps Script 的沙盒 iframe 里，内层网址是 userCodeAppPanel。
-   直接 location.reload() 会重整那个网址 —— 但它单独打开不会重跑 doGet，
-   结果就是一片黑。所以要导回 /exec，让它重新产生一次。
-   这个网址就是部署网址，跟 Vercel 外层包的是同一个，换部署也不会变。 */
-var APP_EXEC_URL='https://script.google.com/macros/s/AKfycbwv-QmaPM0i-B1ud8hWUAtbtz0wtQlpuzwmMIY1l7L2e7PRDurbEblJrQI9eVHmp1Sr8w/exec';
-function reloadApp(){
-  // 1) 外层同源（例如直接开 exec）就整页重整，最乾净
-  try{ if(window.top!==window && window.top.location.href){ window.top.location.reload(); return; } }catch(e){}
-  // 2) 通知外层自己重整（外层若有听）
-  try{ window.top.postMessage({vp:'reload'},'*'); }catch(e){}
-  // 3) 保底：本层导回 /exec —— 这条一定行
-  setTimeout(function(){ navTo(APP_EXEC_URL) },250);
-}
-function navTo(u){ try{ location.href=u }catch(e){ try{ location.reload() }catch(e2){} } }
+/* App 跑在 Apps Script 的沙盒 iframe 里。之前试过用 JS 去 window.top.location=... 或
+   reload() —— 沙盒常常直接挡掉，或者 Google 那边判定「这不是使用者亲手点出来的」，
+   结果不是没反应，就是弹去要重新登入、卡在半路。
+   真正稳的做法：不要用 JS 导，直接放一颗「货真价实」的连结 <a target="_top">。
+   浏览器原生支援这种跳出 iframe 的方式，不会被沙盒挡，也不会被当成程式自动导页。
+   点了就直接回到平常开 app 那个 Vercel 网址，跟平常登入的路一模一样。 */
+var APP_HOME_URL='https://v-p-trading.vercel.app/';
 function checkStale(serverBuild){
   if(!serverBuild||!PAGE_BUILD||serverBuild===PAGE_BUILD)return;
   var bar=document.createElement('div');
@@ -426,12 +419,12 @@ function checkStale(serverBuild){
     'background:linear-gradient(180deg,#3a2f10,#2a220c);border-bottom:1px solid rgba(233,168,53,.5);'+
     'color:#f0c96a;font-size:13px;display:flex;align-items:center;gap:10px';
   bar.innerHTML='<span style="flex:1">有新版本（你手机上是旧的）</span>'+
-    '<button style="background:#e9a835;color:#1a1408;border:0;border-radius:8px;'+
-    'padding:7px 14px;font-size:13px;font-weight:600">立即更新</button>';
-  bar.querySelector('button').onclick=function(){
+    '<a href="'+APP_HOME_URL+'" target="_top" rel="noopener" style="background:#e9a835;color:#1a1408;'+
+    'border:0;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:600;text-decoration:none;'+
+    'display:inline-block">立即更新</a>';
+  bar.querySelector('a').addEventListener('click',function(){
     try{ if(window.caches&&caches.keys)caches.keys().then(function(k){k.forEach(function(n){caches.delete(n)})}) }catch(e){}
-    reloadApp();
-  };
+  });
   document.body.appendChild(bar);
 }
 function logout(){
