@@ -1977,6 +1977,7 @@ function drawRen(){
    '<label class="lbl" style="color:var(--bad)">要改的名字</label>'+
    '<input class="inp" placeholder="打字找…" value="'+esc(RN.q)+'" oninput="RN.q=this.value;refreshRen()" style="margin-bottom:9px">'+
    '<div class="chips" id="rnL">'+renList()+'</div>'+
+   '<div id="rnFromHint">'+renFromHint()+'</div>'+
    '<div style="height:16px"></div>'+
    '<label class="lbl" style="color:var(--ok)">改成</label>'+
    '<input class="inp" id="rnTo" placeholder="打新名字" value="'+esc(RN.to)+'" oninput="RN.to=this.value;renPreview()">'+
@@ -1984,7 +1985,17 @@ function drawRen(){
    '<div style="height:12px"></div><button class="btn o" onclick="closeSheet()">取消</button>');
 }
 function refreshRen(){ var e=document.getElementById('rnL'); if(e)e.innerHTML=renList() }
-function pickRen(n){ RN.from=n; RN.mode=''; RN.branch=''; refreshRen(); renPreview() }
+function renFromHint(){
+  if(!RN.from)return '';
+  var list=S.boot.people[RN.from]||[];
+  if(list.length<=1)return '';
+  return '<div class="hint" style="margin-top:8px">「'+esc(RN.from)+'」在 '+list.length+' 间分行有资料：'+
+    esc(list.map(function(x){return x.branch}).join('、'))+'</div>';
+}
+function pickRen(n){
+  RN.from=n; RN.mode=''; RN.branch=''; refreshRen(); renPreview();
+  var fh=document.getElementById('rnFromHint'); if(fh)fh.innerHTML=renFromHint();
+}
 var RNT=null;
 function renPreview(){
   var pv=document.getElementById('rnPv'); if(!pv)return;
