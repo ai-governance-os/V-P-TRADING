@@ -2411,7 +2411,10 @@ function makeInvoicePdf(p) {
   }
 }
 
-/** 填销售员的发票资料（抬头 / 公司 / 地址 / 电话） */
+/** 填销售员的发票资料（抬头 / 公司 / 地址 / 电话）
+    一个人跑几间分行，是可以各自留不同抬头/地址的（例如车行地址 vs 个人地址）——
+    预设只写选中那一间；p.sameAll 才广播到全部分行（旧行为，一样可以选）。
+    发票方式一律只跟着分行走，跟 sameAll 无关。 */
 function saveBillTo(p) {
   var name = normName_(p && p.salesman);
   if (!name) return { ok: false, msg: '请选销售员' };
@@ -2426,10 +2429,15 @@ function saveBillTo(p) {
   var brRows = branch
     ? rows.filter(function (r) { return up_(r.BRANCH) === up_(branch); })
     : [];
+  // 只有一间分行的人没有「哪一间」的问题，永远写那一行
+  var sameAll = rows.length <= 1 || !!p.sameAll;
+  var target = sameAll ? rows : brRows;
+  if (!target.length) return { ok: false, msg: '请先选要改哪一间分行' };
+
   var res = withLock_(function () {
     Object.keys(map).forEach(function (k) {
       var c = t.head.indexOf(k) + 1;
-      if (c > 0) rows.forEach(function (r) { t.sheet.getRange(r.__row, c).setValue(map[k]); });
+      if (c > 0) target.forEach(function (r) { t.sheet.getRange(r.__row, c).setValue(map[k]); });
     });
     if (p.perOrder !== undefined && brRows.length) {
       var cm = t.head.indexOf('发票方式') + 1;
@@ -2485,20 +2493,26 @@ function getBillTo(p) {
   t.rows.forEach(function (r) {
     if (normName_(r.SALESMAN) !== name) return;
     if (!hit) hit = r;
-    // 抬头／地址是「人」的，分行只影响「发票方式」
+    // 抬头／地址是「分行」的 —— 车行地址跟个人地址可以不一样，
+    // 每间分行带自己的一份，前端切分行的时候才知道要换哪四个栏位
     if (branch && !brHit && up_(r.BRANCH) === up_(branch)) brHit = r;
     var bn = String(r.BRANCH || '').trim();
-    if (bn) branches.push({ branch: bn, perOrder: isPo(r) });
+    if (bn) branches.push({
+      branch: bn, perOrder: isPo(r),
+      title: String(r['发票抬头'] || ''), company: String(r['公司名'] || ''),
+      addr: String(r['地址'] || ''), tel: String(r['电话'] || '')
+    });
   });
   if (!hit) return { ok: false, msg: '名单里没有这个人' };
   // 跨分行的人，前端要让他们自己挑要改哪一间 —— 不能从卡片猜，会改错间
   var row = brHit || (branches.length === 1 ? hit : null);
+  var src = row || hit;
   return { ok: true, salesman: name,
     branches: branches,
     branch: row ? String(row.BRANCH || '') : '',
     perOrder: row ? isPo(row) : false,
-    title: String(hit['发票抬头'] || ''), company: String(hit['公司名'] || ''),
-    addr: String(hit['地址'] || ''), tel: String(hit['电话'] || '') };
+    title: String(src['发票抬头'] || ''), company: String(src['公司名'] || ''),
+    addr: String(src['地址'] || ''), tel: String(src['电话'] || '') };
 }
 
 /**
