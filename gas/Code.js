@@ -527,8 +527,8 @@ function buildBoot_() {
     var pr = toNum_(r.UNIT_PRICE);
     setTypes[k].push({
       price: pr, profit: toNum_(r.PROFIT_PER_SET),
-      // 表里填了就以表为准；没填就用内建的（客户自己讲过的那几组）
-      desc: String(r['说明'] || r.DESC || '').trim() || (DESC_FALLBACK_[k + '|' + pr] || '')
+      desc: String(r['说明'] || r.DESC || '').trim() || (DESC_FALLBACK_[k + '|' + pr] || ''),
+      manualFee: up_(r['手动抽成']) === 'YES'
     });
   });
   Object.keys(setTypes).forEach(function (k) {
@@ -569,7 +569,6 @@ function buildBoot_() {
     driver: { name: String(drv.DRIVER_NAME || ''), phone: String(drv.PHONE || '').replace(/[^0-9]/g, ''), allowance: toNum_(drv.ALLOWANCE_PER_MONTH) },
     build: (typeof BUILD_ID === 'string' ? BUILD_ID : ''),
     brands: invBrandList_().slice().sort(),
-    // 新手提醒：手动选过 15 笔就当他们学会了，之後不再显示（不靠浏览器存档）
     showBrandHint: brandHintOn_(),
     setTypes: setTypes,
     people: people,
@@ -1685,7 +1684,7 @@ function renameSalesman(p) {
 
 /** 给维护介面看的完整价目表（含已停用的） */
 function listSetPrice() {
-  var t = ensureCols_('SET_PRICE', ['说明', '英文品名']);
+  var t = ensureCols_('SET_PRICE', ['说明', '英文品名', '手动抽成']);
   var used = {};
   readTable_('ORDERS').rows.forEach(function (r) {
     if (isVoid_(r)) return;
@@ -1702,6 +1701,8 @@ function listSetPrice() {
       invName: String(r['英文品名'] || '').trim() ||
                invNameOf_(st, String(r['说明'] || '').trim() || (DESC_FALLBACK_[up_(st) + '|' + pr] || '')),
       active: up_(r.ACTIVE) !== 'NO',
+      manualPrice: pr === 0,
+      manualFee: up_(r['手动抽成']) === 'YES',
       used: used[up_(st) + '|' + pr] || 0
     });
   });
@@ -1747,15 +1748,20 @@ function toggleSetPrice(p) {
 
 /** 新增一组价目。已存在就当作「改」——顺便把停用的恢复回来。 */
 function saveSetPrice(p) {
-  var st = up_(p && p.setType).replace(/\s+/g, ' ').trim();
-  var pr = toNum_(p && p.price), pf = toNum_(p && p.profit);
+  var st = up_(p && p.setType).replace(/s+/g, ' ').trim();
+  var manualPrice = !!(p && p.manualPrice);
+  var manualFee = !!(p && p.manualFee);
+  var pr = manualPrice ? 0 : toNum_(p && p.price);
+  var pf = manualPrice ? 0 : toNum_(p && p.profit);
   var desc = String((p && p.desc) || '').trim();
   if (!st) return { ok: false, msg: '请填 SET 类型' };
-  if (pr <= 0) return { ok: false, msg: '售价要大于 0' };
-  if (pf < 0) return { ok: false, msg: '每 set 利润不能是负的' };
-  if (pf > pr) return { ok: false, msg: '利润比售价还高，请再确认' };
+  if (!manualPrice) {
+    if (pr <= 0) return { ok: false, msg: '售价要大于 0' };
+    if (pf < 0) return { ok: false, msg: '每 set 利润不能是负的' };
+    if (pf > pr) return { ok: false, msg: '利润比售价还高，请再确认' };
+  }
 
-  var t = ensureCols_('SET_PRICE', ['说明', '英文品名']);
+  var t = ensureCols_('SET_PRICE', ['说明', '英文品名', '手动抽成']);
   var hit = null;
   t.rows.forEach(function (r) {
     if (up_(r.SET_TYPE) === st && toNum_(r.UNIT_PRICE) === pr) hit = r;
@@ -1764,7 +1770,8 @@ function saveSetPrice(p) {
   var cP = t.head.indexOf('PROFIT_PER_SET') + 1,
       cD = t.head.indexOf('说明') + 1,
       cN = t.head.indexOf('英文品名') + 1,
-      cA = t.head.indexOf('ACTIVE') + 1;
+      cA = t.head.indexOf('ACTIVE') + 1,
+      cM = t.head.indexOf('手动抽成') + 1;
   var inv = String((p && p.invName) || '').trim();
 
   var r = withLock_(function () {
@@ -1773,12 +1780,14 @@ function saveSetPrice(p) {
       if (cD > 0 && desc) t.sheet.getRange(hit.__row, cD).setValue(desc);
       if (cN > 0 && inv) t.sheet.getRange(hit.__row, cN).setValue(inv);
       if (cA > 0) t.sheet.getRange(hit.__row, cA).setValue('YES');
+      if (cM > 0) t.sheet.getRange(hit.__row, cM).setValue(manualFee ? 'YES' : '');
     } else {
       t.sheet.appendRow(t.head.map(function (h) {
         return h === 'SET_TYPE' ? st : h === 'UNIT_PRICE' ? pr
           : h === 'PROFIT_PER_SET' ? pf : h === '说明' ? desc
             : h === '英文品名' ? (inv || invNameOf_(st, desc))
-              : h === 'ACTIVE' ? 'YES' : h === '历史笔数' ? 0 : '';
+              : h === 'ACTIVE' ? 'YES' : h === '历史笔数' ? 0
+                : h === '手动抽成' ? (manualFee ? 'YES' : '') : '';
       }));
     }
     return { ok: true };
@@ -1787,9 +1796,11 @@ function saveSetPrice(p) {
 
   clearBootCache_();
   logChange_({ kind: '价目表', action: hit ? '修改' : '新增',
-               from: st + ' RM ' + pr, to: '利润 RM ' + pf + (desc ? ' · ' + desc : ''),
+               from: st + (manualPrice ? '（售价手动填）' : ' RM ' + pr),
+               to: (manualPrice ? '' : '利润 RM ' + pf) + (manualFee ? '（司机抽成手动填）' : '') + (desc ? ' · ' + desc : ''),
                by: (p && p.by) || '' });
-  return { ok: true, updated: !!hit, setType: st, price: pr, profit: pf, desc: desc };
+  return { ok: true, updated: !!hit, setType: st, price: pr, profit: pf, desc: desc,
+           manualPrice: manualPrice, manualFee: manualFee };
 }
 
 /* ═════════════════════════════════════════════════════════
