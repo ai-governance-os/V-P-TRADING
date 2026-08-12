@@ -2030,11 +2030,20 @@ function poKey_(salesman, branch) { return up_(salesman) + '@' + up_(branch); }
 
 /** 销售员那几栏发票资料。
     t 可以从外面传进来 —— 不传的话每呼叫一次就重读整张 SALESMAN 表，
-    一个月三十个客户就是三十次全表读取，那正是开发票清单要跑 30 秒的原因。 */
-function billTo_(salesman, mode, t) {
+    一个月三十个客户就是三十次全表读取，那正是开发票清单要跑 30 秒的原因。
+
+    branch：这张发票是哪一间分行的生意。一个人跑几间分行，SALESMAN 表里
+    就有几行；只比对名字会永远拿到最前面那一行，发票上就印错车行。
+    传了分行就优先拿那一行，没传 / 找不到才退回第一行（旧行为）。 */
+function billTo_(salesman, mode, t, branch) {
   t = t || ensureCols_('SALESMAN', ['发票抬头', '公司名', '地址', '电话']);
-  var hit = null;
-  t.rows.forEach(function (r) { if (!hit && up_(r.SALESMAN) === up_(salesman)) hit = r; });
+  var hit = null, exact = null;
+  t.rows.forEach(function (r) {
+    if (up_(r.SALESMAN) !== up_(salesman)) return;
+    if (!hit) hit = r;
+    if (branch && !exact && up_(r.BRANCH) === up_(branch)) exact = r;
+  });
+  if (exact) hit = exact;
   var company = hit ? String(hit['公司名'] || '').trim() : '';
   var title = hit ? String(hit['发票抬头'] || '').trim() : '';
   var nm = (mode === 'COMPANY' ? (company || title) : (title || String(salesman))) || String(salesman);
@@ -2046,7 +2055,8 @@ function billTo_(salesman, mode, t) {
     company: co,
     addr: hit ? String(hit['地址'] || '').trim() : '',
     tel: hit ? String(hit['电话'] || '').trim() : '',
-    branch: hit ? String(hit.BRANCH || '').trim() : ''
+    // 订单说是哪一间就印哪一间 —— 名单里查不到那一行也照印，订单才是事实
+    branch: String(branch || (hit ? hit.BRANCH : '') || '').trim()
   };
 }
 
@@ -2139,14 +2149,17 @@ function listInvoiceMonth(p) {
     var po = !!perOrder[poKey_(r.SALESMAN, r.BRANCH)] && !issued[up_(custKey_(r))];
     var key = custKey_(r, po);
     if (!g[key]) {
-      var b = billTo_(r.SALESMAN, mode, smT);
+      var b = billTo_(r.SALESMAN, mode, smT, r.BRANCH);
       g[key] = { key: key, salesman: String(r.SALESMAN || ''), mode: mode,
-                 billName: b.name, branch: b.branch || String(r.BRANCH || ''),
+                 billName: b.name, brs: {},
                  hasAddr: !!b.addr, n: 0, amount: 0,
                  perOrder: po,
                  orderId: po ? String(r.ORDER_ID || '').trim() : '',
                  date: po ? fmtDate_(r.DATE) : '' };
     }
+    // 月结可能跨分行 —— 清单上全部列出来，不要只显示碰巧第一笔那间
+    var bn = String(r.BRANCH || '').trim();
+    if (bn) g[key].brs[bn] = 1;
     g[key].n++; g[key].amount += toNum_(r.TOTAL_INCOME);
   });
 
@@ -2156,6 +2169,10 @@ function listInvoiceMonth(p) {
     g[k].amount = Math.round(g[k].amount * 100) / 100;
     g[k].invNo = issued[up_(k)] || '';
     g[k].voided = voided[up_(k)] || 0;
+    var brs = Object.keys(g[k].brs);
+    g[k].branch = brs.join(' / ');
+    g[k].nBranch = brs.length;
+    delete g[k].brs;
     return g[k];
   }).sort(function (a, b) { return b.amount - a.amount; });
 
@@ -2192,6 +2209,7 @@ function getInvoice(p) {
     lines.push({
       date: shortDate_(d),
       iso: d,
+      branch: String(r.BRANCH || '').trim(),
       desc: (brand ? brand + ' ' : '') + nm,
       qty: q, unit: unitOf_(r.SET_TYPE), price: pr,
       amount: Math.round(q * pr * 100) / 100,
@@ -2201,15 +2219,36 @@ function getInvoice(p) {
   });
   if (!lines.length) return { ok: false, msg: '这个月这位客户没有订单' };
 
-  lines.sort(function (a, b) { return a.iso < b.iso ? -1 : 1; });   // 用 ISO 排，别用 dd.mm.yy
+  lines.sort(function (a, b) { return a.iso < b.iso ? -1 : a.iso > b.iso ? 1 : 0; });  // 用 ISO 排，别用 dd.mm.yy
+
+  // 月结可能一个人跨几间分行。段落顺序照「各分行第一笔的日期」，
+  // 整张单读起来还是照时间走，不会变成按字母跳。
+  var brOrder = {}, brList = [];
+  lines.forEach(function (l) {
+    if (l.branch && brOrder[l.branch] === undefined) {
+      brOrder[l.branch] = brList.length; brList.push(l.branch);
+    }
+  });
+  if (brList.length > 1) {
+    lines.forEach(function (l, i) { l.__i = i; });                  // 同分行内保持日期序
+    lines.sort(function (a, b) {
+      var x = brOrder[a.branch] === undefined ? 9999 : brOrder[a.branch];
+      var y = brOrder[b.branch] === undefined ? 9999 : brOrder[b.branch];
+      return x !== y ? x - y : a.__i - b.__i;
+    });
+    lines.forEach(function (l) { delete l.__i; });
+  }
+
   gross = Math.round(gross * 100) / 100;
   sub = Math.round(sub * 100) / 100;
   var disc = Math.round((gross - sub) * 100) / 100;
 
-  var b = billTo_(salesman, mode, smT);
+  // 单一分行：抬头那块印这间分行。跨分行：抬头不印，改成内文分段列出来。
+  var b = billTo_(salesman, mode, smT, brList.length === 1 ? brList[0] : '');
+  if (brList.length > 1) b.branch = '';
   return {
     ok: true, ym: ym, key: key, mode: mode, salesman: salesman,
-    billTo: b, lines: lines, qty: qty,
+    billTo: b, lines: lines, qty: qty, branches: brList,
     gross: gross, discount: disc, total: sub,
     company: VP_INFO_,
     dateStr: shortDate_(Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd'))
@@ -2237,16 +2276,42 @@ function money_(n) {
  */
 function invoiceHtml_(iv, invNo) {
   var C = iv.company, b = iv.billTo;
-  var rows = iv.lines.map(function (l, i) {
+
+  /* 一个人一个月跑了几间分行时，明细照分行分段，每段一个小计。
+     只有跨分行才分段 —— 单一分行（绝大多数）渲染出来跟以前一模一样。
+     小计加的是 Amount 那一栏（数量 × 单价），客户拿计算机加那一栏必须对得上；
+     折扣不分摊进各分行，分摊会产生分不尽的角位，反而被质疑。 */
+  var multi = (iv.branches || []).length > 1;
+  var cell = 'padding:6px 4px;border-bottom:1px solid #e4e2dd;font-size:10pt';
+  var brHead = function (br) {
+    return '<tr><td colspan="6" style="padding:12px 4px 4px;font-size:9.5pt;font-weight:bold;'
+      + 'letter-spacing:.5px;border-bottom:1px solid #cfccc5">' + esc_(br || '—') + '</td></tr>';
+  };
+  var brSub = function (br, amt) {
     return '<tr>'
-      + '<td style="padding:6px 4px;border-bottom:1px solid #e4e2dd;font-size:10pt">' + (i + 1) + '.</td>'
-      + '<td style="padding:6px 4px;border-bottom:1px solid #e4e2dd;font-size:10pt">' + esc_(l.date) + '</td>'
-      + '<td style="padding:6px 4px;border-bottom:1px solid #e4e2dd;font-size:10pt">' + esc_(l.desc) + '</td>'
-      + '<td align="right" style="padding:6px 4px;border-bottom:1px solid #e4e2dd;font-size:10pt">' + l.qty + ' ' + l.unit + '</td>'
-      + '<td align="right" style="padding:6px 4px;border-bottom:1px solid #e4e2dd;font-size:10pt">' + money_(l.price) + '</td>'
-      + '<td align="right" style="padding:6px 4px;border-bottom:1px solid #e4e2dd;font-size:10pt">' + money_(l.amount) + '</td>'
+      + '<td colspan="5" align="right" style="padding:5px 8px 2px;font-size:9.5pt;color:#555">'
+      + esc_(br || '—') + ' 小计</td>'
+      + '<td align="right" style="padding:5px 4px 2px;font-size:9.5pt;font-weight:bold">'
+      + money_(amt) + '</td></tr>';
+  };
+  var rows = '', curBr = null, brSum = 0;
+  iv.lines.forEach(function (l, i) {
+    if (multi && l.branch !== curBr) {
+      if (curBr !== null) rows += brSub(curBr, brSum);
+      curBr = l.branch; brSum = 0;
+      rows += brHead(l.branch);
+    }
+    brSum += l.amount;
+    rows += '<tr>'
+      + '<td style="' + cell + '">' + (i + 1) + '.</td>'          // 编号连续跑，查帐的人数行数才对得上
+      + '<td style="' + cell + '">' + esc_(l.date) + '</td>'
+      + '<td style="' + cell + '">' + esc_(l.desc) + '</td>'
+      + '<td align="right" style="' + cell + '">' + l.qty + ' ' + l.unit + '</td>'
+      + '<td align="right" style="' + cell + '">' + money_(l.price) + '</td>'
+      + '<td align="right" style="' + cell + '">' + money_(l.amount) + '</td>'
       + '</tr>';
-  }).join('');
+  });
+  if (multi && curBr !== null) rows += brSub(curBr, brSum);
 
   var totRow = function (label, val, bold) {
     return '<tr>'

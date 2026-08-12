@@ -1546,7 +1546,9 @@ function drawInvList(){
         (x.hasAddr?'':'<br><span style="font-size:11px;color:var(--warn)">⚠ 还没填地址</span>')+
       '</span>'+
       '<span style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">'+
-        '<button class="chip" onclick="editBill(\''+esc(x.salesman).replace(/'/g,"\\'")+'\',\''+esc(x.branch).replace(/'/g,"\\'")+'\')">资料</button>'+
+        /* 跨分行的传空字串 —— 让他自己挑要改哪一间，不要替他猜 */
+        '<button class="chip" onclick="editBill(\''+esc(x.salesman).replace(/'/g,"\\'")+'\',\''+
+          (x.nBranch>1?'':esc(x.branch).replace(/'/g,"\\'"))+'\')">资料</button>'+
         (x.invNo?'<button class="chip" onclick="askVoidInv(\''+esc(x.invNo).replace(/'/g,"\\'")+'\')">作废</button>':'')+
         '<button class="chip on" onclick="dlInv(\''+esc(x.key).replace(/'/g,"\\'")+'\')">PDF</button>'+
       '</span></div>';
