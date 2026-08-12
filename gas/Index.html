@@ -507,9 +507,12 @@ function renderOrder(){
   var b=S.boot;
   var types=Object.keys(b.setTypes);
   var tiers=F.setType?b.setTypes[F.setType]:[];
+  var curT=tiers.length===1?tiers[0]:null;
+  var manualPrice=!!(curT&&curT.price===0);
+  var manualFee=!!(curT&&curT.manualFee);
   var branches=F.salesman&&b.people[F.salesman]?b.people[F.salesman]:[];
   var total=F.qty*F.price, mine=F.qty*F.profit, fee=calcFee();
-  var ready=F.salesman&&F.branch&&F.setType&&F.price>0&&F.qty>0;
+  var ready=F.salesman&&F.branch&&F.setType&&F.price>0&&F.qty>0&&(!manualFee||F.ovFee!=='');
 
   document.getElementById('v-order').innerHTML=
   '<div class="h1">新订单</div><div class="h1s">New Order</div>'+
@@ -532,9 +535,26 @@ function renderOrder(){
    '<div class="chips">'+types.map(function(t){
      return '<button class="chip'+(F.setType===t?' on':'')+'" onclick="pickSet(\''+esc(t).replace(/'/g,"\\'")+'\')">'+esc(t)+'</button>'}).join('')+
    '</div>'+
-   (tiers.length?('<div style="margin-top:15px"><label class="lbl">售价 / '+unitOf(F.setType)+'</label><div class="chips">'+
+   (manualPrice?(
+     '<div style="margin-top:15px">'+
+       '<label class="lbl" style="color:var(--warn)">售价 RM（手动填）</label>'+
+       '<input class="inp" type="number" inputmode="decimal" placeholder="0.00" value="'+(F.price||'')+'" '+
+         'oninput="F.price=parseFloat(this.value)||0;softSum()">'+
+       '<div style="height:12px"></div>'+
+       '<label class="lbl" style="color:var(--warn)">每 '+unitOf(F.setType)+' 利润 RM（手动填）</label>'+
+       '<input class="inp" type="number" inputmode="decimal" placeholder="0.00" value="'+(F.profit||'')+'" '+
+         'oninput="F.profit=parseFloat(this.value)||0;softSum()">'+
+     '</div>'
+   ):(tiers.length?('<div style="margin-top:15px"><label class="lbl">售价 / '+unitOf(F.setType)+'</label><div class="chips">'+
      tiers.map(function(t,i){return '<button class="chip'+(F.price===t.price?' on':'')+'" onclick="pickPrice('+i+')">RM '+t.price+
-       '<small>赚 RM'+t.profit+'</small></button>'}).join('')+'</div></div>'):'')+
+       '<small>赚 RM'+t.profit+'</small></button>'}).join('')+'</div></div>'):''))+
+   (manualFee?(
+     '<div style="margin-top:15px;border-top:1px solid var(--line);padding-top:14px">'+
+       '<label class="lbl" style="color:var(--warn)">司机抽成 RM（手动填，不会自动算）</label>'+
+       '<input class="inp" type="number" inputmode="decimal" placeholder="0.00" value="'+(F.ovFee!==''?F.ovFee:'')+'" '+
+         'oninput="F.ovFee=this.value;softSum()">'+
+     '</div>'
+   ):'')+
   '</div>'+
 
   '<div class="card"><label class="lbl">数量（'+(F.setType?unitOf(F.setType):'set')+'）</label>'+
@@ -599,11 +619,15 @@ function sumHtml(total,mine,fee){
    (admin?'<div class="sumrow"><span class="k">我的利润</span><span class="v" style="color:var(--ok)"><span class="cur">RM</span>'+rm(F.ovMine!==''?F.ovMine:mine)+'</span></div>':'')+
    '<div class="sumrow"><span class="k">司机抽成</span><span class="v" style="color:var(--warn)"><span class="cur">RM</span>'+rm(F.ovFee!==''?F.ovFee:fee)+'</span></div>';
 }
+function curManualFee(){
+  var ts=S.boot&&S.boot.setTypes&&S.boot.setTypes[F.setType];
+  return !!(ts&&ts.length===1&&ts[0].manualFee);
+}
 function softSum(){
   var t=F.qty*F.price,m=F.qty*F.profit,f=calcFee();
   var el=document.getElementById('sumbox'); if(el)el.innerHTML=sumHtml(t,m,f);
   var btn=document.querySelector('.btn.p');
-  if(btn){var ready=F.salesman&&F.branch&&F.setType&&F.price>0&&F.qty>0;
+  if(btn){var ready=F.salesman&&F.branch&&F.setType&&F.price>0&&F.qty>0&&(!curManualFee()||F.ovFee!=='');
     if(ready)btn.removeAttribute('disabled');else btn.setAttribute('disabled','')}
 }
 function calcFee(){ // 前端即时预览，提交时后端会重算
@@ -666,7 +690,7 @@ function applyTier(t){
   var g=GRADES.filter(function(x){return F.drvDesc===x})[0];
   F.drvGrade = g || '';
 }
-function pickSet(t){F.setType=t;var ts=S.boot.setTypes[t];
+function pickSet(t){F.setType=t;F.ovFee='';var ts=S.boot.setTypes[t];
   if(ts&&ts.length===1){applyTier(ts[0])}else{F.price=0;F.profit=0;F.drvDesc='';F.drvGrade=''}
   var c=colorOfSet(t);
   if(c)F.drvColor=c;                       // BLACK / RED UMBRELLA：名字就写明了
@@ -2126,8 +2150,11 @@ function drawPrice(){
       g[k].map(function(x){
         return '<div class="sumrow" style="align-items:center'+(x.active?'':';opacity:.42')+'">'+
           '<span class="k" style="flex:1">'+
-            '<b style="color:var(--ink);font-size:15px">RM '+x.price+'</b>'+
-            '<span style="opacity:.65;font-size:12.5px"> · 利 RM '+x.profit+'</span>'+
+            (x.manualPrice
+              ?'<b style="color:var(--warn);font-size:14px">售价／利润：下单时手动填</b>'
+              :'<b style="color:var(--ink);font-size:15px">RM '+x.price+'</b>'+
+               '<span style="opacity:.65;font-size:12.5px"> · 利 RM '+x.profit+'</span>')+
+            (x.manualFee?'<br><span style="font-size:11px;color:var(--warn)">司机抽成：下单时手动填</span>':'')+
             (x.desc?'<br><span style="font-size:12px;opacity:.75">'+esc(x.desc)+'</span>':'')+
             (x.invName?'<br><span style="font-size:11px;opacity:.55">'+esc(x.invName)+'</span>':'')+
             (x.used?'<br><span style="font-size:11px;opacity:.5">用过 '+x.used+' 笔</span>':'')+
@@ -2150,18 +2177,30 @@ function drawPrice(){
 function priceEdit(setType,price){
   var cur=(PL.list||[]).find(function(x){return x.setType===setType&&x.price===price})||null;
   var types=[...new Set((PL.list||[]).map(function(x){return x.setType}))].sort();
+  var mp=!!(cur&&cur.manualPrice), mf=!!(cur&&cur.manualFee);
   openSheet('<div style="font-family:var(--sf);font-size:25px;margin-bottom:3px">'+(cur?'改售价':'新增售价')+'</div>'+
-   '<div class="h1s" style="margin-bottom:18px">'+(cur?esc(setType)+' · RM '+price:'填好按储存')+'</div>'+
+   '<div class="h1s" style="margin-bottom:18px">'+(cur?esc(setType)+(mp?' · 售价手动填':' · RM '+price):'填好按储存')+'</div>'+
    (cur?'':'<label class="lbl">SET 类型</label>'+
      '<div class="chips" style="margin-bottom:9px">'+types.map(function(t){
         return '<button class="chip" onclick="document.getElementById(\'pST\').value=\''+esc(t).replace(/'/g,"\\'")+'\'">'+esc(t)+'</button>'}).join('')+'</div>')+
    '<input class="inp" id="pST" '+(cur?'disabled':'')+' placeholder="例：10 ITEMS" value="'+esc(setType)+'" style="margin-bottom:12px">'+
+   '<label style="display:flex;align-items:center;gap:8px;margin:2px 0 14px;font-size:13px;color:var(--dim)">'+
+     '<input type="checkbox" id="pMP" '+(mp?'checked':'')+(cur?' disabled':'')+
+       ' onchange="document.getElementById(\'pPriceBlock\').style.display=this.checked?\'none\':\'\'">'+
+     '这个商品的售价不固定，下单时手动填'+(cur?'（建立后不能改，要改请停用这组、重新新增）':'')+
+   '</label>'+
+   '<div id="pPriceBlock" style="'+(mp?'display:none':'')+'">'+
    '<div class="row" style="margin-bottom:12px">'+
      '<div><div class="lbl" style="letter-spacing:.14em">售价 RM</div>'+
-       '<input class="inp" id="pPR" inputmode="decimal" '+(cur?'disabled':'')+' value="'+(price||'')+'"></div>'+
+       '<input class="inp" id="pPR" inputmode="decimal" '+(cur?'disabled':'')+' value="'+(mp?'':(price||''))+'"></div>'+
      '<div><div class="lbl" style="letter-spacing:.14em">每 set 利润 RM</div>'+
-       '<input class="inp" id="pPF" inputmode="decimal" value="'+(cur?cur.profit:'')+'"></div>'+
-   '</div>'+
+       '<input class="inp" id="pPF" inputmode="decimal" value="'+(cur&&!mp?cur.profit:'')+'"></div>'+
+   '</div></div>'+
+   (mp?'<div class="hint" style="margin-bottom:14px">这个商品已经设成售价手动填，下单页会直接跳出输入框。</div>':'')+
+   '<label style="display:flex;align-items:center;gap:8px;margin:2px 0 14px;font-size:13px;color:var(--dim)">'+
+     '<input type="checkbox" id="pMF" '+(mf?'checked':'')+'>'+
+     '司机抽成不要自动算，下单时手动填'+
+   '</label>'+
    '<label class="lbl">给司机看的说明（选填）</label>'+
    '<input class="inp" id="pDS" placeholder="例：好的雨伞 / 普通雨伞" value="'+esc(cur?cur.desc:'')+'" style="margin-bottom:6px">'+
    '<div class="hint" style="margin-bottom:14px">这句会印在送货单上，让 TAN 一看就知道拿哪一款。</div>'+
@@ -2172,9 +2211,11 @@ function priceEdit(setType,price){
    '<div style="height:8px"></div><button class="btn o" onclick="askPrice()">返回</button>');
 }
 function priceSave(){
+  var mp=document.getElementById('pMP').checked;
+  var mf=document.getElementById('pMF').checked;
   var st=document.getElementById('pST').value, pr=document.getElementById('pPR').value,
       pf=document.getElementById('pPF').value, ds=document.getElementById('pDS').value;
-  call('saveSetPrice',[{setType:st,price:pr,profit:pf,desc:ds,
+  call('saveSetPrice',[{setType:st,price:pr,profit:pf,desc:ds,manualPrice:mp,manualFee:mf,
     invName:(document.getElementById('pIN')||{}).value||'',by:(S.user||{}).name||''}]).then(function(r){
     if(!r.ok){toast(r.msg,'bad');return}
     toast(r.updated?'已更新':'已新增','ok');
