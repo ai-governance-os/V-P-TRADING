@@ -1711,32 +1711,38 @@ function listSetPrice() {
   return { ok: true, list: out };
 }
 
-/** 停用 / 恢复。不做真删除 —— 历史订单要查得回价目。 */
+/** 停用 / 恢复。不做真删除 —— 历史订单要查得回价目。
+ * 价目表偶尔会有同个 SET_TYPE+价钱重复好几行的历史资料（例如汇入时重复），
+ * 之前这里只认「最后找到的那一行」，重复资料时按了停用会看起来「没反应」——
+ * 其实是改到了另一行。现在改成同样价钱的全部一起处理，不会再卡住。 */
 function toggleSetPrice(p) {
   var st = up_(p && p.setType), pr = toNum_(p && p.price);
   var want = !!(p && p.active);
   if (!st || pr <= 0) return { ok: false, msg: '请选一组价目' };
 
   var t = ensureCols_('SET_PRICE', ['说明']);
-  var hit = null;
+  var hits = [];
   t.rows.forEach(function (r) {
-    if (up_(r.SET_TYPE) === st && toNum_(r.UNIT_PRICE) === pr) hit = r;
+    if (up_(r.SET_TYPE) === st && toNum_(r.UNIT_PRICE) === pr) hits.push(r);
   });
-  if (!hit) return { ok: false, msg: '价目表里找不到这一组' };
+  if (!hits.length) return { ok: false, msg: '价目表里找不到这一组' };
 
   var c = t.head.indexOf('ACTIVE') + 1;
   if (c <= 0) return { ok: false, msg: 'SET_PRICE 缺少 ACTIVE 栏位' };
 
   var r = withLock_(function () {
-    t.sheet.getRange(hit.__row, c).setValue(want ? 'YES' : 'NO');
+    hits.forEach(function (hit) {
+      t.sheet.getRange(hit.__row, c).setValue(want ? 'YES' : 'NO');
+    });
     return { ok: true };
   });
   if (!r.ok) return r;
 
   clearBootCache_();
   logChange_({ kind: '价目表', action: want ? '恢复' : '停用',
-               from: st + ' RM ' + pr, to: '', by: (p && p.by) || '' });
-  return { ok: true, setType: st, price: pr, active: want };
+               from: st + ' RM ' + pr + (hits.length > 1 ? '（' + hits.length + ' 行重复一起改）' : ''),
+               to: '', by: (p && p.by) || '' });
+  return { ok: true, setType: st, price: pr, active: want, rows: hits.length };
 }
 
 /** 新增一组价目。已存在就当作「改」——顺便把停用的恢复回来。 */

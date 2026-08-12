@@ -2185,7 +2185,8 @@ function priceSave(){
 function priceToggle(setType,price,active){
   call('toggleSetPrice',[{setType:setType,price:price,active:active,by:(S.user||{}).name||''}]).then(function(r){
     if(!r.ok){toast(r.msg,'bad');return}
-    toast(active?'已恢复':'已停用，下单页看不到了','ok');
+    var extra=(r.rows>1)?('（发现 '+r.rows+' 行重复资料，已经一起处理）'):'';
+    toast((active?'已恢复':'已停用，下单页看不到了')+extra,'ok');
     S.boot=null;
     call('bootstrap',[]).then(function(b){S.boot=b;askPrice()}).catch(function(){askPrice()});
   }).catch(function(e){toast(String(e.message||e),'bad')});
