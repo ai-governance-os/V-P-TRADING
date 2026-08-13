@@ -520,16 +520,21 @@ function clearBootCache_() { try { CacheService.getScriptCache().remove('boot');
 function buildBoot_() {
   var cfg = config_();
   var sp = readTable_('SET_PRICE').rows.filter(function (r) { return up_(r.ACTIVE) !== 'NO' && r.SET_TYPE; });
-  var setTypes = {};
+  var setTypes = {}, setUnits = {};
   sp.forEach(function (r) {
     var k = String(r.SET_TYPE).trim();
     if (!setTypes[k]) setTypes[k] = [];
     var pr = toNum_(r.UNIT_PRICE);
     setTypes[k].push({
       price: pr, profit: toNum_(r.PROFIT_PER_SET),
-      desc: String(r['说明'] || r.DESC || '').trim() || (DESC_FALLBACK_[k + '|' + pr] || ''),
-      manualFee: up_(r['手动抽成']) === 'YES'
+      // 表里填了就以表为准；没填就用内建的（客户自己讲过的那几组）
+      desc: String(r['说明'] || r.DESC || '').trim() || (DESC_FALLBACK_[k + '|' + pr] || '')
     });
+    // 价目表「单位」栏明确填过才放进去；没填的品项前端会自己退回猜名字的规则
+    if (!setUnits[k]) {
+      var u = up_(r['单位']);
+      if (u === 'PCS' || u === 'SET') setUnits[k] = u.toLowerCase();
+    }
   });
   Object.keys(setTypes).forEach(function (k) {
     setTypes[k].sort(function (a, b) { return a.price - b.price; });
@@ -569,8 +574,10 @@ function buildBoot_() {
     driver: { name: String(drv.DRIVER_NAME || ''), phone: String(drv.PHONE || '').replace(/[^0-9]/g, ''), allowance: toNum_(drv.ALLOWANCE_PER_MONTH) },
     build: (typeof BUILD_ID === 'string' ? BUILD_ID : ''),
     brands: invBrandList_().slice().sort(),
+    // 新手提醒：手动选过 15 笔就当他们学会了，之後不再显示（不靠浏览器存档）
     showBrandHint: brandHintOn_(),
     setTypes: setTypes,
+    setUnits: setUnits,
     people: people,
     branches: branches
   };
@@ -710,12 +717,27 @@ function submitOrder(p) {
 
 
 /* ---------- WhatsApp 文字 ---------- */
-/** 单卖雨伞、袋子这类单品用 pcs；goodie bag 之类套装用 set。TAN 的习惯。 */
-function unitOf_(setType) {
+/** 单卖雨伞、袋子这类单品用 pcs；goodie bag 之类套装用 set。TAN 的习惯。
+    这只是没人设定过的时候用来猜的备案，价目表填了「单位」就不会走到这里。 */
+function unitGuess_(setType) {
   var t = up_(setType);
   if (t.indexOf('+') >= 0) return 'set';          // UMBRELLA + BAG 算一组
   if (/UMBRELLA|BAG/.test(t) && !/ITEM/.test(t)) return 'pcs';
   return 'set';
+}
+/** 这个 SET 名字算 set 还是 pcs —— 价目表「单位」栏填了就照填的（同名字底下
+    随便哪个价位有填就算数，单位是这个品项种类的属性，不是单一价位的）；
+    没填才退回上面那个猜名字的规则，旧资料完全不用动。
+    t 可以从外面传进来，避免迴圈里重读整张 SET_PRICE 表。 */
+function unitOf_(setType, t) {
+  t = t || ensureCols_('SET_PRICE', ['单位']);
+  var v = '';
+  t.rows.forEach(function (r) {
+    if (v || up_(r.SET_TYPE) !== up_(setType)) return;
+    var u = up_(r['单位']);
+    if (u === 'PCS' || u === 'SET') v = u.toLowerCase();
+  });
+  return v || unitGuess_(setType);
 }
 
 /** 送货单上那句中文：颜色 + 款式 + 价目表说明，能凑几个凑几个 */
@@ -1684,7 +1706,7 @@ function renameSalesman(p) {
 
 /** 给维护介面看的完整价目表（含已停用的） */
 function listSetPrice() {
-  var t = ensureCols_('SET_PRICE', ['说明', '英文品名', '手动抽成']);
+  var t = ensureCols_('SET_PRICE', ['说明', '英文品名', '单位']);
   var used = {};
   readTable_('ORDERS').rows.forEach(function (r) {
     if (isVoid_(r)) return;
@@ -1700,9 +1722,8 @@ function listSetPrice() {
       desc: String(r['说明'] || '').trim() || (DESC_FALLBACK_[up_(st) + '|' + pr] || ''),
       invName: String(r['英文品名'] || '').trim() ||
                invNameOf_(st, String(r['说明'] || '').trim() || (DESC_FALLBACK_[up_(st) + '|' + pr] || '')),
+      unit: unitOf_(st, t),   // 填了就是填的，没填是猜的 —— 前端要分清楚显示
       active: up_(r.ACTIVE) !== 'NO',
-      manualPrice: pr === 0,
-      manualFee: up_(r['手动抽成']) === 'YES',
       used: used[up_(st) + '|' + pr] || 0
     });
   });
@@ -1712,56 +1733,71 @@ function listSetPrice() {
   return { ok: true, list: out };
 }
 
-/** 停用 / 恢复。不做真删除 —— 历史订单要查得回价目。
- * 价目表偶尔会有同个 SET_TYPE+价钱重复好几行的历史资料（例如汇入时重复），
- * 之前这里只认「最后找到的那一行」，重复资料时按了停用会看起来「没反应」——
- * 其实是改到了另一行。现在改成同样价钱的全部一起处理，不会再卡住。 */
+/** 停用 / 恢复。不做真删除 —— 历史订单要查得回价目。 */
 function toggleSetPrice(p) {
   var st = up_(p && p.setType), pr = toNum_(p && p.price);
   var want = !!(p && p.active);
   if (!st || pr <= 0) return { ok: false, msg: '请选一组价目' };
 
   var t = ensureCols_('SET_PRICE', ['说明']);
-  var hits = [];
+  var hit = null;
   t.rows.forEach(function (r) {
-    if (up_(r.SET_TYPE) === st && toNum_(r.UNIT_PRICE) === pr) hits.push(r);
+    if (up_(r.SET_TYPE) === st && toNum_(r.UNIT_PRICE) === pr) hit = r;
   });
-  if (!hits.length) return { ok: false, msg: '价目表里找不到这一组' };
+  if (!hit) return { ok: false, msg: '价目表里找不到这一组' };
 
   var c = t.head.indexOf('ACTIVE') + 1;
   if (c <= 0) return { ok: false, msg: 'SET_PRICE 缺少 ACTIVE 栏位' };
 
   var r = withLock_(function () {
-    hits.forEach(function (hit) {
-      t.sheet.getRange(hit.__row, c).setValue(want ? 'YES' : 'NO');
-    });
+    t.sheet.getRange(hit.__row, c).setValue(want ? 'YES' : 'NO');
     return { ok: true };
   });
   if (!r.ok) return r;
 
   clearBootCache_();
   logChange_({ kind: '价目表', action: want ? '恢复' : '停用',
-               from: st + ' RM ' + pr + (hits.length > 1 ? '（' + hits.length + ' 行重复一起改）' : ''),
-               to: '', by: (p && p.by) || '' });
-  return { ok: true, setType: st, price: pr, active: want, rows: hits.length };
+               from: st + ' RM ' + pr, to: '', by: (p && p.by) || '' });
+  return { ok: true, setType: st, price: pr, active: want };
+}
+
+/** 切换某个 SET 名字要算 set 还是 pcs。单位是这个品项种类的属性，不是单一价位的 ——
+    同名字底下不管有几个价位，全部一起改，不会出现「9 ITEMS 这个价位是 pcs、
+    那个价位是 set」这种同名字却不一致的状况。 */
+function setUnitFor(p) {
+  var st = up_(p && p.setType);
+  var unit = up_(p && p.unit);
+  if (!st) return { ok: false, msg: '请选一个品项' };
+  if (unit !== 'PCS' && unit !== 'SET') return { ok: false, msg: '单位只能是 SET 或 PCS' };
+
+  var t = ensureCols_('SET_PRICE', ['单位']);
+  var rows = t.rows.filter(function (r) { return up_(r.SET_TYPE) === st; });
+  if (!rows.length) return { ok: false, msg: '价目表里找不到这个品项' };
+  var c = t.head.indexOf('单位') + 1;
+  if (c <= 0) return { ok: false, msg: 'SET_PRICE 缺少「单位」栏位' };
+
+  var r = withLock_(function () {
+    rows.forEach(function (row) { t.sheet.getRange(row.__row, c).setValue(unit); });
+    return { ok: true };
+  });
+  if (!r.ok) return r;
+
+  clearBootCache_();
+  logChange_({ kind: '价目表', action: '改单位', from: st, to: unit, by: (p && p.by) || '' });
+  return { ok: true, setType: st, unit: unit.toLowerCase() };
 }
 
 /** 新增一组价目。已存在就当作「改」——顺便把停用的恢复回来。 */
 function saveSetPrice(p) {
-  var st = up_(p && p.setType).replace(/s+/g, ' ').trim();
-  var manualPrice = !!(p && p.manualPrice);
-  var manualFee = !!(p && p.manualFee);
-  var pr = manualPrice ? 0 : toNum_(p && p.price);
-  var pf = manualPrice ? 0 : toNum_(p && p.profit);
+  var st = up_(p && p.setType).replace(/\s+/g, ' ').trim();
+  var pr = toNum_(p && p.price), pf = toNum_(p && p.profit);
   var desc = String((p && p.desc) || '').trim();
   if (!st) return { ok: false, msg: '请填 SET 类型' };
-  if (!manualPrice) {
-    if (pr <= 0) return { ok: false, msg: '售价要大于 0' };
-    if (pf < 0) return { ok: false, msg: '每 set 利润不能是负的' };
-    if (pf > pr) return { ok: false, msg: '利润比售价还高，请再确认' };
-  }
+  if (pr <= 0) return { ok: false, msg: '售价要大于 0' };
+  if (pf < 0) return { ok: false, msg: '每 set 利润不能是负的' };
+  if (pf > pr) return { ok: false, msg: '利润比售价还高，请再确认' };
 
-  var t = ensureCols_('SET_PRICE', ['说明', '英文品名', '手动抽成']);
+  var t = ensureCols_('SET_PRICE', ['说明', '英文品名']);
   var hit = null;
   t.rows.forEach(function (r) {
     if (up_(r.SET_TYPE) === st && toNum_(r.UNIT_PRICE) === pr) hit = r;
@@ -1770,8 +1806,7 @@ function saveSetPrice(p) {
   var cP = t.head.indexOf('PROFIT_PER_SET') + 1,
       cD = t.head.indexOf('说明') + 1,
       cN = t.head.indexOf('英文品名') + 1,
-      cA = t.head.indexOf('ACTIVE') + 1,
-      cM = t.head.indexOf('手动抽成') + 1;
+      cA = t.head.indexOf('ACTIVE') + 1;
   var inv = String((p && p.invName) || '').trim();
 
   var r = withLock_(function () {
@@ -1780,14 +1815,12 @@ function saveSetPrice(p) {
       if (cD > 0 && desc) t.sheet.getRange(hit.__row, cD).setValue(desc);
       if (cN > 0 && inv) t.sheet.getRange(hit.__row, cN).setValue(inv);
       if (cA > 0) t.sheet.getRange(hit.__row, cA).setValue('YES');
-      if (cM > 0) t.sheet.getRange(hit.__row, cM).setValue(manualFee ? 'YES' : '');
     } else {
       t.sheet.appendRow(t.head.map(function (h) {
         return h === 'SET_TYPE' ? st : h === 'UNIT_PRICE' ? pr
           : h === 'PROFIT_PER_SET' ? pf : h === '说明' ? desc
             : h === '英文品名' ? (inv || invNameOf_(st, desc))
-              : h === 'ACTIVE' ? 'YES' : h === '历史笔数' ? 0
-                : h === '手动抽成' ? (manualFee ? 'YES' : '') : '';
+              : h === 'ACTIVE' ? 'YES' : h === '历史笔数' ? 0 : '';
       }));
     }
     return { ok: true };
@@ -1796,11 +1829,9 @@ function saveSetPrice(p) {
 
   clearBootCache_();
   logChange_({ kind: '价目表', action: hit ? '修改' : '新增',
-               from: st + (manualPrice ? '（售价手动填）' : ' RM ' + pr),
-               to: (manualPrice ? '' : '利润 RM ' + pf) + (manualFee ? '（司机抽成手动填）' : '') + (desc ? ' · ' + desc : ''),
+               from: st + ' RM ' + pr, to: '利润 RM ' + pf + (desc ? ' · ' + desc : ''),
                by: (p && p.by) || '' });
-  return { ok: true, updated: !!hit, setType: st, price: pr, profit: pf, desc: desc,
-           manualPrice: manualPrice, manualFee: manualFee };
+  return { ok: true, updated: !!hit, setType: st, price: pr, profit: pf, desc: desc };
 }
 
 /* ═════════════════════════════════════════════════════════
@@ -2208,7 +2239,7 @@ function getInvoice(p) {
   var salesman = baseKey.split('|')[0];
 
   var t = ensureCols_('ORDERS', ['INVOICE_TO', 'INV_BRAND']);
-  var spT = ensureCols_('SET_PRICE', ['说明', '英文品名']);                    // 只读一次
+  var spT = ensureCols_('SET_PRICE', ['说明', '英文品名', '单位']);             // 只读一次
   var brandList = invBrandList_();                                            // 只算一次
   var smT = ensureCols_('SALESMAN', ['发票抬头', '公司名', '地址', '电话', '发票方式']);   // 只读一次
   var perOrder = perOrderSet_(smT);
@@ -2228,7 +2259,7 @@ function getInvoice(p) {
       iso: d,
       branch: String(r.BRANCH || '').trim(),
       desc: (brand ? brand + ' ' : '') + nm,
-      qty: q, unit: unitOf_(r.SET_TYPE), price: pr,
+      qty: q, unit: unitOf_(r.SET_TYPE, spT), price: pr,
       amount: Math.round(q * pr * 100) / 100,
       total: tot
     });
