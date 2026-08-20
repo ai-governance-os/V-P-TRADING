@@ -415,6 +415,14 @@ function doLogin(){
    真正稳的做法：不要用 JS 导，直接放一颗「货真价实」的连结 <a target="_top">。
    浏览器原生支援这种跳出 iframe 的方式，不会被沙盒挡，也不会被当成程式自动导页。
    点了就直接回到平常开 app 那个 Vercel 网址，跟平常登入的路一模一样。 */
+/* WhatsApp 连结也是同样的沙盒问题 —— 之前用 window.open(url,'_blank') 在手机上
+   常常卡在一个打不开也关不掉的空白分页，要关机才能脱身。改成动态塞一颗
+   <a target="_top"> 真连结再帮使用者点一下，跟上面 checkStale 的做法一样稳。 */
+function openWa_(url){
+  var a=document.createElement('a');
+  a.href=url; a.target='_top'; a.rel='noopener';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+}
 var APP_HOME_URL='https://v-p-trading.vercel.app/';
 function checkStale(serverBuild){
   if(!serverBuild||!PAGE_BUILD||serverBuild===PAGE_BUILD)return;
@@ -855,7 +863,7 @@ function successSheet(o,wa){
    '<div class="card"><div class="sumrow"><span class="k">'+esc(o.SALESMAN)+'</span><span class="v" style="font-size:14px">'+esc(o.BRANCH)+'</span></div>'+
    '<div class="sumrow"><span class="k">'+esc(o.SET_TYPE)+' × '+o.QTY+'</span><span class="v"><span class="cur">RM</span>'+rm(o.TOTAL_INCOME)+'</span></div></div>'+
    '<label class="lbl">通知司机的内容</label><div class="mono">'+esc(wa)+'</div><div style="height:15px"></div>'+
-   (phone?'<a href="https://wa.me/'+phone+'?text='+encodeURIComponent(wa)+'" target="_blank" style="text-decoration:none">'+
+   (phone?'<a href="https://wa.me/'+phone+'?text='+encodeURIComponent(wa)+'" target="_top" rel="noopener" style="text-decoration:none">'+
      '<button class="btn g">WhatsApp 通知司机</button></a><div style="height:9px"></div>'
     :'<div class="hint" style="background:rgba(226,104,95,.1);border-color:rgba(226,104,95,.35);color:var(--bad)">'+
      '还没设定司机电话，不能一键发送。'+(S.user.role==='admin'?'请到「设定」页填上号码。':'请叫 admin 到「设定」页填上号码。')+'</div>')+
@@ -1497,7 +1505,7 @@ function waBill(){
   L.push('共 '+b.orders+' 单 / '+rm0(b.sets)+' set');
   var phone=(S.boot&&S.boot.driver&&S.boot.driver.phone)||'';
   var url='https://wa.me/'+phone+'?text='+encodeURIComponent(L.join('\n'));
-  window.open(url,'_blank');
+  openWa_(url);
 }
 
 /* ================= 发票 Invoice ================= */
@@ -1889,7 +1897,7 @@ function notify(){
     openSheet('<div style="font-family:var(--sf);font-size:25px;margin-bottom:3px">通知司机</div>'+
      '<div class="h1s" style="margin-bottom:18px">'+r.count+' 单 · '+esc(r.phone||'未设号码')+'</div>'+
      '<div class="mono">'+esc(r.text)+'</div><div style="height:16px"></div>'+
-     (r.phone?'<a href="https://wa.me/'+r.phone+'?text='+encodeURIComponent(r.text)+'" target="_blank" style="text-decoration:none">'+
+     (r.phone?'<a href="https://wa.me/'+r.phone+'?text='+encodeURIComponent(r.text)+'" target="_top" rel="noopener" style="text-decoration:none">'+
        '<button class="btn g">打开 WhatsApp 发送</button></a><div style="height:9px"></div>'
       :'<div class="hint" style="background:rgba(226,104,95,.1);border-color:rgba(226,104,95,.35);color:var(--bad)">'+
        '还没设定司机电话，所以不能一键发送。'+(S.user.role==='admin'?'请到「设定」页填上号码。':'请叫 admin 到「设定」页填上号码。')+
@@ -2381,7 +2389,7 @@ function testWa(){
   var ph=(S.drv&&S.drv.phone)||'';
   if(!ph){toast('还没设定电话','bad');return}
   var t='V&P TRADING 测试讯息 — 如果你收到这则，代表一键通知已经设定好了。';
-  window.open('https://wa.me/'+ph+'?text='+encodeURIComponent(t),'_blank');
+  openWa_('https://wa.me/'+ph+'?text='+encodeURIComponent(t));
 }
 function peek(i){
   var el=document.getElementById('pv'+i);
