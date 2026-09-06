@@ -38,3 +38,12 @@ by timestamp within each execution, preserving the script timezone.
 one read for both lists, old pending orders outside the recent 300, void/payment
 rules, and timezone-boundary dates. On its fixture, 640 date conversions become
 one. This is an operation count, not a claim about production milliseconds.
+
+Third pass: the navigation bundle also computes the default dashboard from the
+same order table. Admin settings prefetch uses one authenticated endpoint instead
+of two, caches only within the login, and invalidates on account/driver changes.
+Unsaved settings inputs survive tab revisits. `startup-backend.cjs` verifies
+authorization, one USERS read for settings, lazy spreadsheet connection, and
+bootstrap's reuse of BRANCH data (including historical inactive brands).
+The PIN page's fonts load without blocking render; the Vercel wrapper removes
+its extra 400ms delay and shortens the splash fade to 150ms.

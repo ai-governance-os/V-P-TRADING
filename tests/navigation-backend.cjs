@@ -1,9 +1,9 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
-let reads=0,formats=0;
+let reads=0,formats=0,driverReads=0;
 const head=['ORDER_ID','DATE','MONTH','SALESMAN','BRANCH','SET_TYPE','QTY','UNIT_PRICE','TOTAL_INCOME','STATUS','DELIVERY_STATUS','PAY_STATUS','PAY_DATE'];
 const date=new Date('2026-08-31T16:00:00Z'); // midnight in Malaysia
 const rows=Array.from({length:1200},(_,i)=>['VP'+String(i).padStart(5,'0'),date,9,'TEST','TEST BRANCH','BAG',1,10,10,i===1199?'VOID':'',i===0||i>=1180?'PENDING':'DELIVERED',i%2?'OP':'UNPAID',date]);
-const context={SpreadsheetApp:{getActiveSpreadsheet:()=>({getSheetByName:()=>({getDataRange:()=>({getValues:()=>{reads++;return [head,...rows]}})})})},Session:{getScriptTimeZone:()=> 'Asia/Kuala_Lumpur'},Utilities:{formatDate:(d,tz)=>{formats++;return new Intl.DateTimeFormat('en-CA',{timeZone:tz,year:'numeric',month:'2-digit',day:'2-digit'}).format(d)}}};
+const context={SpreadsheetApp:{getActiveSpreadsheet:()=>({getSheetByName:name=>({getDataRange:()=>({getValues:()=>{if(name==='DRIVER'){driverReads++;return [['DRIVER_NAME','ALLOWANCE_PER_MONTH'],['TEST',50]]}reads++;return [head,...rows]}})})})},Session:{getScriptTimeZone:()=> 'Asia/Kuala_Lumpur'},Utilities:{formatDate:(d,tz)=>{formats++;return new Intl.DateTimeFormat('en-CA',{timeZone:tz,year:'numeric',month:'2-digit',day:'2-digit'}).format(d)}}};
 vm.createContext(context);vm.runInContext(fs.readFileSync('gas/Code.js','utf8'),context);
 const result=context.getNavigationOrders();
 assert.equal(reads,1,'one physical sheet read for both pages');
@@ -19,4 +19,10 @@ assert.equal(context.fmtDate_('2026-08-01'),'2026-08-01');
 assert.equal(context.fmtDate_(''),'');
 assert.equal(context.fmtDate_(new Date('2026-09-01T16:00:00Z')),'2026-09-02');
 assert.equal(formats,2,'distinct timestamps retain distinct dates');
-console.log('13 backend navigation assertions passed; 1 sheet read; 640 repeated date conversions -> 1');
+assert.equal(result.dashboard.total.orders,1199);
+assert.equal(result.dashboard.total.income,11990);
+assert.equal(result.dashboard.allowance,50);
+assert.equal(driverReads,1);
+const standalone=context.getDashboard({});
+assert.deepEqual(JSON.parse(JSON.stringify(result.dashboard)),JSON.parse(JSON.stringify(standalone)));
+console.log('18 backend navigation assertions passed; one ORDERS read for all three destinations');

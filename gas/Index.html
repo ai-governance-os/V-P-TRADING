@@ -11,7 +11,7 @@
 <title>V&amp;P TRADING</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500;600&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500;600&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
 <style>
 :root{
   --bg:#08080A; --bg2:#0E0E11; --card:rgba(255,255,255,.032); --card2:rgba(255,255,255,.055);
@@ -286,7 +286,7 @@ var MONTHS=['','一月','二月','三月','四月','五月','六月','七月','�
 var HAS_GS = (typeof google!=='undefined' && google.script && google.script.run);
 function call(fn,args){
   var started=Date.now();
-  var writes=/^(submitOrder|markPaid|markUnpaid|updateOrder|voidOrder|changeBranch|markDelivered|renameSalesman|mergeBranch|migratePayment|saveSetPrice|toggleSetPrice|setUnitFor|adminSetDriver|addSalesman|saveBillTo|voidInvoice|makeInvoicePdf)$/.test(fn);
+  var writes=/^(submitOrder|markPaid|markUnpaid|updateOrder|voidOrder|changeBranch|markDelivered|renameSalesman|mergeBranch|migratePayment|saveSetPrice|toggleSetPrice|setUnitFor|adminSetDriver|adminSetPin|adminRenameUser|adminAddUser|adminSetActive|addSalesman|saveBillTo|voidInvoice|makeInvoicePdf)$/.test(fn);
   if(writes)invalidateViews_();
   return new Promise(function(res,rej){
     if(HAS_GS){
@@ -318,12 +318,13 @@ function warmOrders_(){
   var epoch=VIEW_READ.epoch;
   var specs=[{month:'',pay:'',limit:300},{pending:true,limit:120}];
   var keys=specs.map(function(opt){return 'getOrders'+JSON.stringify([opt])});
+  keys.push('getDashboard'+JSON.stringify([{month:''}]));
   if(keys.some(function(key){return VIEW_READ.pending[key]}))return;
   var request=HAS_GS?call('getNavigationOrders',[]):
-    Promise.all(specs.map(function(opt){return call('getOrders',[opt])})).then(function(r){return {orders:r[0],pending:r[1]}});
+    Promise.all(specs.map(function(opt){return call('getOrders',[opt])}).concat([call('getDashboard',[{month:''}])])).then(function(r){return {orders:r[0],pending:r[1],dashboard:r[2]}});
   keys.forEach(function(key,i){
     var pending=request.then(function(result){
-      var rows=i===0?result.orders:result.pending;
+      var rows=i===0?result.orders:i===1?result.pending:result.dashboard;
       if(VIEW_READ.epoch===epoch)VIEW_READ.cache[key]={data:rows,at:Date.now()};
       return rows;
     });
@@ -495,6 +496,7 @@ function doLogin(){
     S.view=(r.user.role==='driver')?'driver':'order';
     AUTH=PIN; BUSY=false; PIN=''; renderApp();
     warmOrders_();
+    if(S.user.role==='admin')settingsRequest_().catch(function(){});
     checkStale(r.boot&&r.boot.build);
   }).catch(function(e){
     clearTimeout(tick); pinBusy(false);
@@ -2010,16 +2012,32 @@ function doneMark(){
 
 /* ================= 设定 · 帐号管理（限 admin） ================= */
 var ROLE_TXT={admin:'管理员 · 可管帐号',partner:'合伙人 · 同等权限',driver:'司机 · 只看送货'};
-function loadSettings(){
+function settingsRequest_(force){
+  var key='adminSettings',epoch=VIEW_READ.epoch,entry=VIEW_READ.cache[key];
+  if(!force&&entry&&Date.now()-entry.at<15000)return Promise.resolve(entry.data);
+  if(VIEW_READ.pending[key])return VIEW_READ.pending[key];
+  var request=HAS_GS?call('getAdminSettings',[AUTH]):
+    Promise.all([call('adminListUsers',[AUTH]),call('adminGetDriver',[AUTH])]).then(function(r){r[0].driver=r[1].driver;return r[0]});
+  var pending=request.then(function(r){
+    if(r.ok&&VIEW_READ.epoch===epoch)VIEW_READ.cache[key]={data:r,at:Date.now()};return r;
+  });
+  VIEW_READ.pending[key]=pending;
+  var clean=function(){if(VIEW_READ.pending[key]===pending)delete VIEW_READ.pending[key]};
+  pending.then(clean,clean);return pending;
+}
+function loadSettings(force){
   var el=document.getElementById('v-set');
+  if(el._settingsDirty&&el._settingsEpoch===VIEW_READ.epoch&&!force)return;
   el.innerHTML='<div class="h1">设定</div><div class="h1s">Accounts</div><div class="load"><div class="spin"></div></div>';
-  var auth=AUTH;
-  Promise.all([call('adminListUsers',[auth]),call('adminGetDriver',[auth]).catch(function(){return {ok:false}})]).then(function(results){
+  var auth=AUTH,epoch=VIEW_READ.epoch;
+  return settingsRequest_(force).then(function(r){
     if(AUTH!==auth||!S.user)return;
-    var r=results[0],d=results[1];
+    if(epoch!==VIEW_READ.epoch){if(S.view==='set')return loadSettings();return}
     if(!r.ok){el.innerHTML='<div class="h1">设定</div><div class="empty">'+esc(r.msg)+'</div>';return}
     S.users=r.users;
-    S.drv=d.ok?d.driver:{name:'',phone:'',allowance:0};renderSettings();
+    S.drv=r.driver||{name:'',phone:'',allowance:0};renderSettings();
+    el._settingsDirty=false;el._settingsEpoch=epoch;
+    el.oninput=function(){el._settingsDirty=true};
   }).catch(function(e){el.innerHTML='<div class="empty">'+esc(e.message||e)+'</div>'});
 }
 function renderSettings(){

@@ -9,7 +9,8 @@ var BUILD_ID = '__BUILD_ID__';
  *            DRIVER_RULE, DRIVER, USERS, CONFIG
  *******************************************************/
 
-var SS = SpreadsheetApp.getActiveSpreadsheet();
+// Serving the PIN screen does not need a spreadsheet connection.
+var SS = null;
 var TZ = Session.getScriptTimeZone() || 'Asia/Kuala_Lumpur';
 
 /* ---------- 入口 ---------- */
@@ -23,6 +24,7 @@ function doGet() {
 
 /* ---------- 工具 ---------- */
 function sh_(name) {
+  if (!SS) SS = SpreadsheetApp.getActiveSpreadsheet();
   var s = SS.getSheetByName(name);
   if (!s) throw new Error('找不到分页：' + name + '（请确认已导入数据表）');
   return s;
@@ -271,6 +273,15 @@ function adminListUsers(adminPin) {
       };
     })
   };
+}
+
+function getAdminSettings(adminPin) {
+  var result = adminListUsers(adminPin);
+  if (!result.ok) return result;
+  var r = readTable_('DRIVER').rows[0] || {};
+  result.driver = { name: String(r.DRIVER_NAME || ''),
+    phone: String(r.PHONE || '').replace(/[^0-9]/g, ''), allowance: toNum_(r.ALLOWANCE_PER_MONTH) };
+  return result;
 }
 
 function adminSetPin(adminPin, target, newPin) {
@@ -555,7 +566,8 @@ function buildBoot_() {
     people[n].sort(function (a, b) { return (b.primary ? 1 : 0) - (a.primary ? 1 : 0) || b.n - a.n; });
   });
 
-  var branches = readTable_('BRANCH').rows
+  var branchRows = readTable_('BRANCH').rows;
+  var branches = branchRows
     .filter(function (r) { return up_(r.ACTIVE) !== 'NO' && r.BRANCH; })
     .map(function (r) {
       return {
@@ -573,7 +585,7 @@ function buildBoot_() {
     defaultPay: cfg.DEFAULT_PAY_STATUS || 'OP',
     driver: { name: String(drv.DRIVER_NAME || ''), phone: String(drv.PHONE || '').replace(/[^0-9]/g, ''), allowance: toNum_(drv.ALLOWANCE_PER_MONTH) },
     build: (typeof BUILD_ID === 'string' ? BUILD_ID : ''),
-    brands: invBrandList_().slice().sort(),
+    brands: invBrandList_(branchRows).slice().sort(),
     // 新手提醒：手动选过 15 笔就当他们学会了，之後不再显示（不靠浏览器存档）
     showBrandHint: brandHintOn_(),
     setTypes: setTypes,
@@ -1168,8 +1180,10 @@ function getMonthlyReport(opt) {
 
 /* ---------- 报表 ---------- */
 function getDashboard(opt) {
+  return dashboardFromTable_(readTable_('ORDERS'), opt);
+}
+function dashboardFromTable_(t, opt) {
   opt = opt || {};
-  var t = readTable_('ORDERS');
   var drv = readTable_('DRIVER').rows[0] || {};
   var allowance = toNum_(drv.ALLOWANCE_PER_MONTH);
 
@@ -1223,7 +1237,8 @@ function getNavigationOrders() {
   var t = readTable_('ORDERS');
   return {
     orders: pickOrders_(t, {}, '', 300),
-    pending: pickOrders_(t, { pending: true }, '', 120)
+    pending: pickOrders_(t, { pending: true }, '', 120),
+    dashboard: dashboardFromTable_(t, {})
   };
 }
 
@@ -2034,11 +2049,11 @@ var INV_BRANDS_FALLBACK_ = ['PERODUA', 'PROTON', 'HONDA', 'CHERY', 'JAECOO',
                             'JETOUR', 'MITSUBISHI', 'EMAS', 'ICAUR'];
 /** 认得的牌子直接从 BRANCH 名单长出来 ——
     他们以後开一间新品牌的分行，备注写那个牌子就自动认得，不必找我改程式。 */
-function invBrandList_() {
+function invBrandList_(branchRows) {
   var out = {};
   INV_BRANDS_FALLBACK_.forEach(function (b) { out[b] = 1; });
   try {
-    readTable_('BRANCH').rows.forEach(function (r) {
+    (branchRows || readTable_('BRANCH').rows).forEach(function (r) {
       var b = up_(r.BRAND);
       if (b && b !== 'OTHER') out[b] = 1;
     });

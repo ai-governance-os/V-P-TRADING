@@ -11,11 +11,12 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-192.png">
 <title>V&amp;P TRADING</title>
+<link rel="preconnect" href="https://script.google.com">
 <style>
   html,body{margin:0;padding:0;height:100%;background:#08080A;overflow:hidden}
   #f{position:fixed;inset:0;width:100%;height:100%;border:0;display:block}
   #splash{position:fixed;inset:0;background:#08080A;display:flex;flex-direction:column;
-    align-items:center;justify-content:center;z-index:9;transition:opacity .5s;font-family:Georgia,serif}
+    align-items:center;justify-content:center;z-index:9;transition:opacity .15s;font-family:Georgia,serif}
   #splash.gone{opacity:0;pointer-events:none}
   .mk{width:112px;height:112px;object-fit:contain;filter:drop-shadow(0 6px 26px rgba(201,162,39,.22))}
   .ln{width:60px;height:1px;margin:20px 0;background:linear-gradient(90deg,transparent,#C9A227,transparent)}
@@ -34,7 +35,7 @@
 
 <script>
   var f=document.getElementById('f'), s=document.getElementById('splash');
-  f.addEventListener('load',function(){setTimeout(function(){s.className='gone'},400)});
+  f.addEventListener('load',function(){s.className='gone'});
   setTimeout(function(){s.className='gone'},9000); // 保险：最多 9 秒一定收起
 </script>
 </body>
