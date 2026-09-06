@@ -1,0 +1,10 @@
+{
+  "name": "vp-trading-regression-tests",
+  "private": true,
+  "scripts": {
+    "test": "node tests/performance.cjs"
+  },
+  "devDependencies": {
+    "jsdom": "26.1.0"
+  }
+}

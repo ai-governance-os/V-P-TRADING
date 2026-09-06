@@ -231,6 +231,8 @@ select.inp{appearance:none;background-image:linear-gradient(45deg,transparent 50
   font-size:29px;color:var(--ok);animation:pop .5s cubic-bezier(.34,1.56,.64,1)}
 @keyframes pop{from{transform:scale(.3);opacity:0}to{transform:none;opacity:1}}
 @media(min-width:760px){.wrap{max-width:640px;margin:0 auto}.grid2{grid-template-columns:repeat(4,1fr)}}
+.read-status{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12px;color:var(--dim);margin-bottom:12px;min-height:32px}
+.read-status button{color:var(--gold2);padding:8px 12px;border:1px solid var(--line);border-radius:8px}
 </style>
 </head>
 <body>
@@ -283,12 +285,84 @@ var MONTHS=['','一月','二月','三月','四月','五月','六月','七月','�
 /* ================= 后端桥接（本地预览有 mock） ================= */
 var HAS_GS = (typeof google!=='undefined' && google.script && google.script.run);
 function call(fn,args){
+  var started=Date.now();
+  var writes=/^(submitOrder|markPaid|markUnpaid|updateOrder|voidOrder|changeBranch|markDelivered|renameSalesman|mergeBranch|migratePayment|saveSetPrice|toggleSetPrice|setUnitFor|adminSetDriver|addSalesman|saveBillTo|voidInvoice|makeInvoicePdf)$/.test(fn);
+  if(writes)invalidateViews_();
   return new Promise(function(res,rej){
     if(HAS_GS){
       google.script.run.withSuccessHandler(res).withFailureHandler(rej)[fn].apply(null,args||[]);
     } else if(window.MOCK && MOCK[fn]){
       setTimeout(function(){res(MOCK[fn].apply(null,args||[]))},220);
     } else rej(new Error('后端未连接：'+fn));
+  }).then(function(r){
+    if(writes)invalidateViews_();
+    recordTiming_(fn,started,true);return r;
+  },function(e){
+    if(writes)invalidateViews_();
+    recordTiming_(fn,started,false);throw e;
+  });
+}
+/* Session-only snapshots: never persist customer data, and never cache writes.
+   Epochs prevent reads started before a save/logout from restoring old data. */
+var VIEW_READ={epoch:0,cache:{},pending:{},seq:{}};
+var RPC_TIMINGS=[];
+function recordTiming_(fn,started,ok){
+  RPC_TIMINGS.push({fn:fn,ms:Date.now()-started,ok:ok});
+  if(RPC_TIMINGS.length>50)RPC_TIMINGS.shift();
+}
+function invalidateViews_(){
+  VIEW_READ.epoch++;VIEW_READ.cache={};VIEW_READ.pending={};
+}
+function viewStatus_(view,entry,message,busy){
+  var el=document.getElementById('v-'+view);if(!el)return;
+  var bar=el.querySelector('.read-status');
+  if(!bar){bar=document.createElement('div');bar.className='read-status';el.insertBefore(bar,el.firstChild)}
+  var stamp=entry?new Date(entry.at).toLocaleTimeString('en-GB',{hour12:false}):'';
+  bar.innerHTML='<span role="status">'+esc(message+(stamp?(message?' · ':'')+'上次更新 '+stamp:''))+'</span>'+
+    '<button type="button" '+(busy?'disabled':'')+' onclick="'+(view==='list'?'loadList':'loadDash')+'(true)">刷新</button>';
+}
+function loadView_(view,fn,args,draw,force){
+  var el=document.getElementById('v-'+view);
+  var key=fn+JSON.stringify(args),epoch=VIEW_READ.epoch;
+  var seq=VIEW_READ.seq[view]=(VIEW_READ.seq[view]||0)+1;
+  var entry=VIEW_READ.cache[key];
+  if(entry){draw(entry.data,el._readKey===key);el._readKey=key}
+  else{
+    el._readKey=null;
+    el.innerHTML='<div class="h1">'+(view==='list'?'订单':'报表')+'</div><div class="load"><div class="spin"></div></div>';
+  }
+  if(entry&&!force&&Date.now()-entry.at<15000){viewStatus_(view,entry,'',false);return Promise.resolve()}
+  viewStatus_(view,entry,entry?'正在更新…':'正在载入…',true);
+  var pending=VIEW_READ.pending[key];
+  if(!pending){
+    pending=call(fn,args).then(function(data){
+      if(VIEW_READ.epoch===epoch){
+        var keys=Object.keys(VIEW_READ.cache);
+        if(keys.length>=20)delete VIEW_READ.cache[keys[0]];
+        VIEW_READ.cache[key]={data:data,at:Date.now()};
+      }
+      return data;
+    });
+    VIEW_READ.pending[key]=pending;
+    var cleanup=function(){if(VIEW_READ.pending[key]===pending)delete VIEW_READ.pending[key]};
+    pending.then(cleanup,cleanup);
+  }
+  function current(){return S.user&&VIEW_READ.seq[view]===seq}
+  function retryChanged(){
+    if(current()&&S.view===view)return loadView_(view,fn,args,draw,true);
+  }
+  return pending.then(function(data){
+    if(!current())return;
+    if(VIEW_READ.epoch!==epoch)return retryChanged();
+    // A response for a hidden view must not overwrite state shared with another page.
+    if(S.view!==view)return;
+    draw(data,el._readKey===key);el._readKey=key;
+    viewStatus_(view,VIEW_READ.cache[key],'',false);
+  },function(e){
+    if(!current()||S.view!==view)return;
+    if(VIEW_READ.epoch!==epoch)return retryChanged();
+    if(!entry)el.innerHTML='<div class="empty">'+esc(e.message||e)+'</div>';
+    viewStatus_(view,entry,entry?'更新失败，当前是上次资料':'载入失败，请重试',false);
   });
 }
 function rm(n){return (Math.round(n*100)/100).toLocaleString('en-MY',{minimumFractionDigits:2,maximumFractionDigits:2})}
@@ -441,6 +515,7 @@ function checkStale(serverBuild){
 }
 function logout(){
   if(!confirm('确定登出？'))return;
+  invalidateViews_();Object.keys(VIEW_READ.seq).forEach(function(v){VIEW_READ.seq[v]++});S.orderQuery='';RPC_TIMINGS=[];
   S.user=null;S.boot=null;S.orders=[];S.dash=null;S.sel={};S.month=0;PIN='';BUSY=false;AUTH='';S.users=null;
   F.salesman='';F.branch='';F.brand='';F.state='';F.region='';F.setType='';F.price=0;F.profit=0;F.qty=1;
   F.note='';F.ovTotal='';F.ovMine='';F.ovFee='';
@@ -871,11 +946,12 @@ function successSheet(o,wa){
 }
 
 /* ================= 订单清单 ================= */
-function loadList(){
-  var el=document.getElementById('v-list');
-  el.innerHTML='<div class="h1">订单</div><div class="h1s">Orders</div><div class="load"><div class="spin"></div></div>';
-  call('getOrders',[{month:S.month||'',pay:S.payFilter||'',limit:300}]).then(function(rows){
-    S.orders=rows;renderList()}).catch(function(e){el.innerHTML='<div class="empty">'+esc(e.message||e)+'</div>'});
+function loadList(force){
+  return loadView_('list','getOrders',[{month:S.month||'',pay:S.payFilter||'',limit:300}],function(rows,same){
+    S.orders=rows;
+    if(same&&document.getElementById('olist'))filterList(S.orderQuery||'');
+    else{renderList();var input=document.querySelector('#v-list input');if(input)input.value=S.orderQuery||'';filterList(S.orderQuery||'')}
+  },force);
 }
 function renderList(){
   var admin=boss();
@@ -894,6 +970,7 @@ function renderList(){
   paintList(S.orders);
 }
 function filterList(q){
+  S.orderQuery=q;
   q=q.trim().toUpperCase();
   paintList(!q?S.orders:S.orders.filter(function(o){
     return o.salesman.toUpperCase().indexOf(q)>=0||o.branch.toUpperCase().indexOf(q)>=0||o.id.toUpperCase().indexOf(q)>=0}));
@@ -1125,11 +1202,8 @@ function doVoid(id){
 }
 
 /* ================= 报表 ================= */
-function loadDash(){
-  var el=document.getElementById('v-dash');
-  el.innerHTML='<div class="h1">报表</div><div class="h1s">Dashboard</div><div class="load"><div class="spin"></div></div>';
-  call('getDashboard',[{month:S.month||''}]).then(function(d){S.dash=d;renderDash()})
-    .catch(function(e){el.innerHTML='<div class="empty">'+esc(e.message||e)+'</div>'});
+function loadDash(force){
+  return loadView_('dash','getDashboard',[{month:S.month||''}],function(d){S.dash=d;renderDash()},force);
 }
 function renderDash(){
   var d=S.dash,t=d.total,admin=boss();
@@ -1919,12 +1993,13 @@ var ROLE_TXT={admin:'管理员 · 可管帐号',partner:'合伙人 · 同等权�
 function loadSettings(){
   var el=document.getElementById('v-set');
   el.innerHTML='<div class="h1">设定</div><div class="h1s">Accounts</div><div class="load"><div class="spin"></div></div>';
-  call('adminListUsers',[AUTH]).then(function(r){
+  var auth=AUTH;
+  Promise.all([call('adminListUsers',[auth]),call('adminGetDriver',[auth]).catch(function(){return {ok:false}})]).then(function(results){
+    if(AUTH!==auth||!S.user)return;
+    var r=results[0],d=results[1];
     if(!r.ok){el.innerHTML='<div class="h1">设定</div><div class="empty">'+esc(r.msg)+'</div>';return}
     S.users=r.users;
-    call('adminGetDriver',[AUTH]).then(function(d){
-      S.drv=d.ok?d.driver:{name:'',phone:'',allowance:0};renderSettings();
-    }).catch(function(){S.drv={name:'',phone:'',allowance:0};renderSettings()});
+    S.drv=d.ok?d.driver:{name:'',phone:'',allowance:0};renderSettings();
   }).catch(function(e){el.innerHTML='<div class="empty">'+esc(e.message||e)+'</div>'});
 }
 function renderSettings(){

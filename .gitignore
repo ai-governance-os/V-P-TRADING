@@ -3,6 +3,8 @@
 ~$*.xlsx
 
 # node
+node_modules/
+.local-test/
 web/node_modules/
 web/dist/
 web/.env.local

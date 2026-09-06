@@ -30,6 +30,11 @@ jobs:
         with:
           node-version: '20'
 
+      - name: 导航与资料刷新回归测试
+        run: |
+          npm ci
+          npm test
+
       # gas/ 里只能有一个后端档。Code.gs 和 Code.js 会映射到同一个
       # Apps Script 档名，两份并存会互相覆盖，而且不会报错。
       - name: 防呆：不准有重复的后端档
