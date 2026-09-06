@@ -1,0 +1,22 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
+let reads=0,formats=0;
+const head=['ORDER_ID','DATE','MONTH','SALESMAN','BRANCH','SET_TYPE','QTY','UNIT_PRICE','TOTAL_INCOME','STATUS','DELIVERY_STATUS','PAY_STATUS','PAY_DATE'];
+const date=new Date('2026-08-31T16:00:00Z'); // midnight in Malaysia
+const rows=Array.from({length:1200},(_,i)=>['VP'+String(i).padStart(5,'0'),date,9,'TEST','TEST BRANCH','BAG',1,10,10,i===1199?'VOID':'',i===0||i>=1180?'PENDING':'DELIVERED',i%2?'OP':'UNPAID',date]);
+const context={SpreadsheetApp:{getActiveSpreadsheet:()=>({getSheetByName:()=>({getDataRange:()=>({getValues:()=>{reads++;return [head,...rows]}})})})},Session:{getScriptTimeZone:()=> 'Asia/Kuala_Lumpur'},Utilities:{formatDate:(d,tz)=>{formats++;return new Intl.DateTimeFormat('en-CA',{timeZone:tz,year:'numeric',month:'2-digit',day:'2-digit'}).format(d)}}};
+vm.createContext(context);vm.runInContext(fs.readFileSync('gas/Code.js','utf8'),context);
+const result=context.getNavigationOrders();
+assert.equal(reads,1,'one physical sheet read for both pages');
+assert.equal(result.orders.length,300);
+assert.equal(result.orders[0].id,'VP01198','void excluded and newest first');
+assert.equal(result.pending.length,20,'includes pending outside recent 300');
+assert.equal(result.pending.at(-1).id,'VP00000','old pending never omitted');
+assert.equal(formats,1,'640 repeated date conversions become one');
+assert.equal(result.orders[0].date,'2026-09-01','Malaysia timezone day preserved');
+assert.equal(result.orders[0].payDate,'2026-09-01');
+assert.equal(result.orders[1].paid,true,'legacy OP payment remains paid');
+assert.equal(context.fmtDate_('2026-08-01'),'2026-08-01');
+assert.equal(context.fmtDate_(''),'');
+assert.equal(context.fmtDate_(new Date('2026-09-01T16:00:00Z')),'2026-09-02');
+assert.equal(formats,2,'distinct timestamps retain distinct dates');
+console.log('13 backend navigation assertions passed; 1 sheet read; 640 repeated date conversions -> 1');

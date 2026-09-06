@@ -1217,6 +1217,16 @@ function getDashboard(opt) {
 }
 
 /* ---------- 订单清单 ---------- */
+/** One sheet read prepares both navigation destinations. Old pending orders
+ * remain included; do not restrict delivery to the newest rows. */
+function getNavigationOrders() {
+  var t = readTable_('ORDERS');
+  return {
+    orders: pickOrders_(t, {}, '', 300),
+    pending: pickOrders_(t, { pending: true }, '', 120)
+  };
+}
+
 function getOrders(opt) {
   opt = opt || {};
   var lim = opt.limit || 300;
@@ -1267,9 +1277,16 @@ function pickOrders_(t, opt, q, lim) {
   return out;
 }
 
+// Per-execution memo only: many orders share the same order/payment dates.
+var DATE_TEXT_ = {};
 function fmtDate_(v) {
   if (!v) return '';
-  if (Object.prototype.toString.call(v) === '[object Date]') return Utilities.formatDate(v, TZ, 'yyyy-MM-dd');
+  if (Object.prototype.toString.call(v) === '[object Date]') {
+    var key = String(v.getTime());
+    if (!Object.prototype.hasOwnProperty.call(DATE_TEXT_, key))
+      DATE_TEXT_[key] = Utilities.formatDate(v, TZ, 'yyyy-MM-dd');
+    return DATE_TEXT_[key];
+  }
   return String(v);
 }
 

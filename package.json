@@ -2,7 +2,7 @@
   "name": "vp-trading-regression-tests",
   "private": true,
   "scripts": {
-    "test": "node tests/performance.cjs"
+    "test": "node tests/performance.cjs && node tests/navigation-backend.cjs"
   },
   "devDependencies": {
     "jsdom": "26.1.0"

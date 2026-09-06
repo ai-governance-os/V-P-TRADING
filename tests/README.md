@@ -26,3 +26,15 @@ late response from undoing that invalidation. No writes are cached or retried.
 For diagnosis, `RPC_TIMINGS` holds the last 50 operation names, elapsed milliseconds,
 and transport-success flags in memory only. It contains no PINs, request arguments,
 response data, or external telemetry. It is cleared on logout.
+
+Second pass: admin/partner login prefetches orders and delivery together through
+`getNavigationOrders`, which reads ORDERS once for both lists. A first click joins
+the in-flight request or uses its completed snapshot. Driver login only requests
+the pending list. Delivery now uses the same session snapshot handling, keeping
+selected IDs only while they remain pending. Backend date formatting is memoized
+by timestamp within each execution, preserving the script timezone.
+
+`navigation-backend.cjs` runs the real backend with a synthetic sheet: it checks
+one read for both lists, old pending orders outside the recent 300, void/payment
+rules, and timezone-boundary dates. On its fixture, 640 date conversions become
+one. This is an operation count, not a claim about production milliseconds.

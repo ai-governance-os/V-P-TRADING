@@ -61,6 +61,27 @@ async function main(){
   w.renderSettings=()=>{};w.loadSettings();check(requests.length===2,'settings reads start together');
   take('adminListUsers').resolve({ok:true,users:[]});take('adminGetDriver').resolve({ok:true,driver:{name:'TEST'}});await flush();check(w.S.drv.name==='TEST','settings responses applied');
   check(w.RPC_TIMINGS.every(t=>typeof t.ms==='number'&&!('args' in t)),'timing log contains no request data');
+  d.getElementById('app').innerHTML='<div id="v-list"></div><div id="v-driver"></div>';
+  w.S.boot={driver:{phone:'',name:'TEST'},setUnits:{}};w.S.month=0;w.S.payFilter='';w.S.sel={};w.S.orderQuery='';
+  w.invalidateViews_();w.warmOrders_();check(requests.length===1&&requests[0].fn==='getNavigationOrders','login warmup combines both destinations');
+  w.S.view='driver';p=w.loadDriver();check(requests.length===1,'delivery click joins prefetch');
+  take('getNavigationOrders').resolve({orders:[row('RECENT')],pending:[row('OLD-PENDING'),row('RECENT')]});await p;
+  check(w.S.pending[0].id==='OLD-PENDING','delivery prefetch retains old pending orders');
+  w.S.view='list';await w.loadList();check(requests.length===0&&w.S.orders[0].id==='RECENT','first orders visit reuses prefetched result');
+  w.S.view='driver';w.S.sel={'OLD-PENDING':true,'RECENT':true};
+  Object.values(w.VIEW_READ.cache).forEach(e=>e.at-=16000);
+  p=w.loadDriver();take('getOrders').resolve([row('OLD-PENDING')]);await p;
+  check(w.S.sel['OLD-PENDING']&&!w.S.sel.RECENT,'refresh preserves valid selections and removes delivered selections');
+  check(d.querySelector('#v-driver .read-status button').getAttribute('onclick')==='loadDriver(true)','delivery refresh targets delivery');
+  const done=w.call('markDelivered',[['OLD-PENDING']]);take('markDelivered').resolve({ok:true});await done;
+  p=w.loadDriver();take('getOrders').resolve([]);await p;
+  check(w.S.pending.length===0&&Object.keys(w.S.sel).length===0,'delivered orders disappear after confirmed write');
+  w.invalidateViews_();w.warmOrders_();const expiredWarmup=take('getNavigationOrders');w.invalidateViews_();
+  expiredWarmup.resolve({orders:[row('STALE')],pending:[row('STALE')]});await flush();
+  check(Object.keys(w.VIEW_READ.cache).length===0,'warmup racing mutation cannot restore stale data');
+  w.warmOrders_();take('getNavigationOrders').reject(new Error('offline'));await flush();
+  check(Object.keys(w.VIEW_READ.pending).length===0,'failed warmup is cleared for retry');
+  w.S.user.role='driver';w.warmOrders_();check(requests.length===0,'driver login does not preload admin orders');
   const names=[...html.matchAll(/^function (\w+)\(/gm)].map(m=>m[1]);check(new Set(names).size===names.length,'no duplicate frontend functions');
   dom.window.close();console.log(`${count} performance assertions passed`);
 }

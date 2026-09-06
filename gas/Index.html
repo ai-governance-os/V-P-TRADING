@@ -313,13 +313,32 @@ function recordTiming_(fn,started,ok){
 function invalidateViews_(){
   VIEW_READ.epoch++;VIEW_READ.cache={};VIEW_READ.pending={};
 }
+function warmOrders_(){
+  if(!S.user||S.user.role==='driver')return;
+  var epoch=VIEW_READ.epoch;
+  var specs=[{month:'',pay:'',limit:300},{pending:true,limit:120}];
+  var keys=specs.map(function(opt){return 'getOrders'+JSON.stringify([opt])});
+  if(keys.some(function(key){return VIEW_READ.pending[key]}))return;
+  var request=HAS_GS?call('getNavigationOrders',[]):
+    Promise.all(specs.map(function(opt){return call('getOrders',[opt])})).then(function(r){return {orders:r[0],pending:r[1]}});
+  keys.forEach(function(key,i){
+    var pending=request.then(function(result){
+      var rows=i===0?result.orders:result.pending;
+      if(VIEW_READ.epoch===epoch)VIEW_READ.cache[key]={data:rows,at:Date.now()};
+      return rows;
+    });
+    VIEW_READ.pending[key]=pending;
+    var clean=function(){if(VIEW_READ.pending[key]===pending)delete VIEW_READ.pending[key]};
+    pending.then(clean,clean);
+  });
+}
 function viewStatus_(view,entry,message,busy){
   var el=document.getElementById('v-'+view);if(!el)return;
   var bar=el.querySelector('.read-status');
   if(!bar){bar=document.createElement('div');bar.className='read-status';el.insertBefore(bar,el.firstChild)}
   var stamp=entry?new Date(entry.at).toLocaleTimeString('en-GB',{hour12:false}):'';
   bar.innerHTML='<span role="status">'+esc(message+(stamp?(message?' · ':'')+'上次更新 '+stamp:''))+'</span>'+
-    '<button type="button" '+(busy?'disabled':'')+' onclick="'+(view==='list'?'loadList':'loadDash')+'(true)">刷新</button>';
+    '<button type="button" '+(busy?'disabled':'')+' onclick="'+(view==='list'?'loadList':view==='driver'?'loadDriver':'loadDash')+'(true)">刷新</button>';
 }
 function loadView_(view,fn,args,draw,force){
   var el=document.getElementById('v-'+view);
@@ -329,7 +348,7 @@ function loadView_(view,fn,args,draw,force){
   if(entry){draw(entry.data,el._readKey===key);el._readKey=key}
   else{
     el._readKey=null;
-    el.innerHTML='<div class="h1">'+(view==='list'?'订单':'报表')+'</div><div class="load"><div class="spin"></div></div>';
+    el.innerHTML='<div class="h1">'+(view==='list'?'订单':view==='driver'?'送货单':'报表')+'</div><div class="load"><div class="spin"></div></div>';
   }
   if(entry&&!force&&Date.now()-entry.at<15000){viewStatus_(view,entry,'',false);return Promise.resolve()}
   viewStatus_(view,entry,entry?'正在更新…':'正在载入…',true);
@@ -475,6 +494,7 @@ function doLogin(){
     S.user=r.user; S.boot=r.boot; F.pay=r.boot.defaultPay||'OP';
     S.view=(r.user.role==='driver')?'driver':'order';
     AUTH=PIN; BUSY=false; PIN=''; renderApp();
+    warmOrders_();
     checkStale(r.boot&&r.boot.build);
   }).catch(function(e){
     clearTimeout(tick); pinBusy(false);
@@ -1932,11 +1952,11 @@ function csvMonthly(r){
 }
 
 /* ================= 司机 ================= */
-function loadDriver(){
-  var el=document.getElementById('v-driver');
-  el.innerHTML='<div class="h1">送货单</div><div class="h1s">Delivery</div><div class="load"><div class="spin"></div></div>';
-  call('getOrders',[{pending:true,limit:120}]).then(function(rows){S.pending=rows;S.sel={};renderDriver()})
-    .catch(function(e){el.innerHTML='<div class="empty">'+esc(e.message||e)+'</div>'});
+function loadDriver(force){
+  return loadView_('driver','getOrders',[{pending:true,limit:120}],function(rows){
+    var selected={};rows.forEach(function(o){if(S.sel[o.id])selected[o.id]=true});
+    S.pending=rows;S.sel=selected;renderDriver();
+  },force);
 }
 function renderDriver(){
   var admin=boss();
