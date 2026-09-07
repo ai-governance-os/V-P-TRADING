@@ -80,6 +80,12 @@ async function main(){
   p=w.loadDriver();take('getOrders').resolve([row('OLD-PENDING')]);await p;
   check(w.S.sel['OLD-PENDING']&&!w.S.sel.RECENT,'refresh preserves valid selections and removes delivered selections');
   check(d.querySelector('#v-driver .read-status button').getAttribute('onclick')==='loadDriver(true)','delivery refresh targets delivery');
+  w.S.sel={'OLD-PENDING':true};w.notify();
+  take('notifyDriver').resolve({ok:true,count:1,phone:'60123456789',text:'TEST DELIVERY'});await flush();
+  check(d.getElementById('sheetBody').textContent.includes('还没有发送给司机，也没有标记送达'),'driver notification preview explains that no action has happened');
+  check(d.querySelector('#sheetBody button[onclick="closeSheet()"]')?.textContent.includes('返回送货单'),'driver notification preview has an explicit exit');
+  check(w.sheetDirty()===false,'hidden notification copy text does not block backdrop or Escape exit');
+  w.closeSheetNow();
   const done=w.call('markDelivered',[['OLD-PENDING']]);take('markDelivered').resolve({ok:true});await done;
   p=w.loadDriver();take('getOrders').resolve([]);await p;
   check(w.S.pending.length===0&&Object.keys(w.S.sel).length===0,'delivered orders disappear after confirmed write');

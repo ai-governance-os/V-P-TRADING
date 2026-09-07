@@ -414,6 +414,7 @@ function sheetDirty(){
   var b=document.getElementById('sheetBody'); if(!b)return false;
   var el=b.querySelectorAll('input,textarea');
   for(var i=0;i<el.length;i++){
+    if(el[i].hasAttribute('data-sheet-clean'))continue; // 复制用的隐藏栏不是未储存输入
     if(document.activeElement===el[i])return true;      // 正在打字
     if(String(el[i].value||'').trim())return true;       // 已经填了东西
   }
@@ -1992,6 +1993,7 @@ function notify(){
     if(!r.ok){toast(r.msg,'bad');return}
     openSheet('<div style="font-family:var(--sf);font-size:25px;margin-bottom:3px">通知司机</div>'+
      '<div class="h1s" style="margin-bottom:18px">'+r.count+' 单 · '+esc(r.phone||'未设号码')+'</div>'+
+     '<div class="hint">这里只是通知预览；还没有发送给司机，也没有标记送达。</div>'+
      '<div class="mono">'+esc(r.text)+'</div><div style="height:16px"></div>'+
      (r.phone?'<a href="https://wa.me/'+r.phone+'?text='+encodeURIComponent(r.text)+'" target="_top" rel="noopener" style="text-decoration:none">'+
        '<button class="btn g">打开 WhatsApp 发送</button></a><div style="height:9px"></div>'
@@ -1999,7 +2001,8 @@ function notify(){
        '还没设定司机电话，所以不能一键发送。'+(S.user.role==='admin'?'请到「设定」页填上号码。':'请叫 admin 到「设定」页填上号码。')+
        '<br>现在可以先「复制文字」，自己贴进 WhatsApp。</div>')+
      '<button class="btn o" onclick="copyTxt()">复制文字</button>'+
-     '<textarea id="cpTxt" style="position:absolute;left:-9999px">'+esc(r.text)+'</textarea>');
+     '<div style="height:9px"></div><button class="btn o" onclick="closeSheet()">取消，返回送货单</button>'+
+     '<textarea id="cpTxt" data-sheet-clean aria-hidden="true" tabindex="-1" readonly style="position:absolute;left:-9999px">'+esc(r.text)+'</textarea>');
   }).catch(function(e){toast(String(e.message||e),'bad')});
 }
 function copyTxt(){var t=document.getElementById('cpTxt');t.select();
