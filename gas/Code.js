@@ -521,7 +521,14 @@ function adminSetActive(adminPin, target, active) {
 /* ---------- 启动资料 ---------- */
 function bootstrap() {
   var cache = CacheService.getScriptCache();
-  try { var hit = cache.get('boot'); if (hit) return JSON.parse(hit); } catch (e) { }
+  try {
+    var hit = cache.get('boot');
+    if (hit) {
+      var cached = JSON.parse(hit);
+      // Deployment identity must come from the executing code, never shared data cache.
+      if (cached.build === BUILD_ID) return cached;
+    }
+  } catch (e) { }
   var o = buildBoot_();
   try { cache.put('boot', JSON.stringify(o), 900); } catch (e) { }
   return o;
