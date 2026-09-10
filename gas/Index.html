@@ -304,19 +304,19 @@ function call(fn,args){
 }
 /* Session-only snapshots: never persist customer data, and never cache writes.
    Epochs prevent reads started before a save/logout from restoring old data. */
-var VIEW_READ={epoch:0,versions:{orders:0,settings:0},cache:{},pending:{},seq:{}};
+var VIEW_READ={epoch:0,versions:{orders:0,settings:0,invoices:0},cache:{},pending:{},seq:{}};
 var RPC_TIMINGS=[];
 function recordTiming_(fn,started,ok){
   RPC_TIMINGS.push({fn:fn,ms:Date.now()-started,ok:ok});
   if(RPC_TIMINGS.length>50)RPC_TIMINGS.shift();
 }
-function readGroup_(key){return key==='adminSettings'?'settings':'orders'}
+function readGroup_(key){return key==='adminSettings'?'settings':key.indexOf('listInvoiceMonth')===0?'invoices':'orders'}
 function readEpoch_(key){return VIEW_READ.epoch+':'+VIEW_READ.versions[readGroup_(key)]}
 function invalidateViews_(fn){
   if(!fn){VIEW_READ.epoch++;VIEW_READ.cache={};VIEW_READ.pending={};return}
   // Invoice issuance/reprinting does not change orders, payments or settings.
-  if(/^(makeInvoicePdf|voidInvoice|saveBillTo)$/.test(fn))return;
-  var groups=/^admin/.test(fn)?['settings']:['orders'];
+  var groups=/^(makeInvoicePdf|voidInvoice|saveBillTo)$/.test(fn)?['invoices']:
+    /^admin/.test(fn)?['settings']:['orders','invoices'];
   if(fn==='adminSetDriver')groups.push('orders');
   groups.forEach(function(group){VIEW_READ.versions[group]++});
   ['cache','pending'].forEach(function(bucket){
@@ -332,11 +332,12 @@ function warmOrders_(){
   var keys=specs.map(function(opt){return 'getOrders'+JSON.stringify([opt])});
   keys.push('getDashboard'+JSON.stringify([{month:''}]));
   if(keys.some(function(key){return VIEW_READ.pending[key]}))return;
-  var request=HAS_GS?call('getNavigationOrders',[]):
-    Promise.all(specs.map(function(opt){return call('getOrders',[opt])}).concat([call('getDashboard',[{month:''}])])).then(function(r){return {orders:r[0],pending:r[1],dashboard:r[2]}});
+  var recent=call('getOrders',[specs[0]]);
+  var summary=HAS_GS?call('getNavigationSummary',[]):
+    Promise.all([call('getOrders',[specs[1]]),call('getDashboard',[{month:''}])]).then(function(r){return {pending:r[0],dashboard:r[1]}});
   keys.forEach(function(key,i){
-    var pending=request.then(function(result){
-      var rows=i===0?result.orders:i===1?result.pending:result.dashboard;
+    var pending=(i===0?recent:summary).then(function(result){
+      var rows=i===0?result:i===1?result.pending:result.dashboard;
       if(readEpoch_(key)===epoch)VIEW_READ.cache[key]={data:rows,at:Date.now()};
       return rows;
     });
@@ -351,7 +352,7 @@ function viewStatus_(view,entry,message,busy){
   if(!bar){bar=document.createElement('div');bar.className='read-status';el.insertBefore(bar,el.firstChild)}
   var stamp=entry?new Date(entry.at).toLocaleTimeString('en-GB',{hour12:false}):'';
   bar.innerHTML='<span role="status">'+esc(message+(stamp?(message?' · ':'')+'上次更新 '+stamp:''))+'</span>'+
-    '<button type="button" '+(busy?'disabled':'')+' onclick="'+(view==='list'?'loadList':view==='driver'?'loadDriver':'loadDash')+'(true)">刷新</button>';
+    '<button type="button" '+(busy?'disabled':'')+' onclick="'+(view==='list'?'loadList':view==='driver'?'loadDriver':view==='bill'?'loadBill':'loadDash')+'(true)">刷新</button>';
 }
 function loadView_(view,fn,args,draw,force){
   var el=document.getElementById('v-'+view);
@@ -361,7 +362,7 @@ function loadView_(view,fn,args,draw,force){
   if(entry){draw(entry.data,el._readKey===key);el._readKey=key}
   else{
     el._readKey=null;
-    el.innerHTML='<div class="h1">'+(view==='list'?'订单':view==='driver'?'送货单':'报表')+'</div><div class="load"><div class="spin"></div></div>';
+    el.innerHTML='<div class="h1">'+(view==='list'?'订单':view==='driver'?'送货单':view==='bill'?'月结单':'报表')+'</div><div class="load"><div class="spin"></div></div>';
   }
   if(entry&&!force&&Date.now()-entry.at<15000){viewStatus_(view,entry,'',false);return Promise.resolve()}
   viewStatus_(view,entry,entry?'正在更新…':'正在载入…',true);
@@ -412,8 +413,9 @@ function toast(m,t){var e=document.getElementById('toast');
    开弹窗时塞一笔历史，返回键就只是关掉弹窗。
    注意 openSheet 会被重复呼叫（例如名单搜寻每打一个字就重画），
    所以只有「从关到开」那一次才塞，不然打十个字就塞十笔历史。 */
-var SHEETNAV=0;
+var SHEETNAV=0,SHEET_REV=0;
 function openSheet(h){
+  SHEET_REV++;
   hideToast();
   document.getElementById('sheetBody').innerHTML=h;
   var s=document.getElementById('sheet');
@@ -1343,15 +1345,13 @@ function loadUnpaid(){
 }
 
 /* ================= 司机月结单 ================= */
-function loadBill(){
+function loadBill(force){
   if(!S.billMonth)S.billMonth=new Date().getMonth()+1;
-  var el=document.getElementById('v-bill');
-  el.innerHTML='<div class="h1">月结单</div><div class="h1s">Driver Statement</div>'+billChips()+
-    '<div class="load"><div class="spin"></div></div>';
-  call('getStatement',[{month:S.billMonth}]).then(function(b){
+  return loadView_('bill','getStatement',[{month:S.billMonth}],function(b){
+    var el=document.getElementById('v-bill');
     if(!b.ok){el.innerHTML='<div class="h1">月结单</div>'+billChips()+'<div class="empty">'+esc(b.msg)+'</div>';return}
     S.bill=b; renderBill();
-  }).catch(function(e){el.innerHTML='<div class="empty">'+esc(e.message||e)+'</div>'});
+  },force);
 }
 function billChips(){
   return '<div class="chips" style="margin-bottom:16px;overflow-x:auto;flex-wrap:nowrap;padding-bottom:4px">'+
@@ -1637,14 +1637,48 @@ function drawInvPick(){
      return '<button class="chip'+(IV.ym===y?' on':'')+'" onclick="loadInv(\''+y+'\')">'+ymLabel(y)+'</button>'}).join('')+'</div>'+
    '<div style="height:14px"></div><button class="btn o" onclick="closeSheet()">取消</button>');
 }
+function cachedRead_(fn,args){
+  var key=fn+JSON.stringify(args),epoch=readEpoch_(key),entry=VIEW_READ.cache[key];
+  if(entry&&Date.now()-entry.at<15000)return Promise.resolve(entry.data);
+  if(VIEW_READ.pending[key])return VIEW_READ.pending[key];
+  var pending=call(fn,args).then(function(data){
+    if(readEpoch_(key)===epoch&&data.ok!==false){
+      var keys=Object.keys(VIEW_READ.cache);if(keys.length>=20)delete VIEW_READ.cache[keys[0]];
+      VIEW_READ.cache[key]={data:data,at:Date.now()};
+    }
+    return data;
+  });
+  VIEW_READ.pending[key]=pending;
+  var clean=function(){if(VIEW_READ.pending[key]===pending)delete VIEW_READ.pending[key]};
+  pending.then(clean,clean);return pending;
+}
+var INV_READ_SEQ=0;
 function loadInv(ym){
   IV.ym=ym;
-  openSheet('<div class="load"><div class="spin"></div></div>'+
+  var key='listInvoiceMonth'+JSON.stringify([{ym:ym}]),epoch=readEpoch_(key),user=S.user,seq=++INV_READ_SEQ;
+  var entry=VIEW_READ.cache[key];
+  function draw(r){IV.list=r.list;IV.candidates=r.candidates||[];IV.need=r.needGrade||[];drawInvList()}
+  if(entry){
+    draw(entry.data);
+    if(Date.now()-entry.at>=15000){
+      var notice=document.createElement('div');notice.textContent='正在后台更新…';notice.className='hint';
+      document.getElementById('sheetBody').prepend(notice);
+    }
+  }else openSheet('<div class="load"><div class="spin"></div></div>'+
     '<div style="text-align:center;color:var(--dim);font-size:14px">整理中…</div>');
-  return call('listInvoiceMonth',[{ym:ym}]).then(function(r){
+  var revision=SHEET_REV;
+  function current(){return user===S.user&&seq===INV_READ_SEQ&&revision===SHEET_REV&&document.getElementById('sheet').classList.contains('on')}
+  return cachedRead_('listInvoiceMonth',[{ym:ym}]).then(function(r){
+    if(!current())return;
+    if(epoch!==readEpoch_(key))return loadInv(ym);
     if(!r.ok){toast(r.msg,'bad');drawInvPick();return}
-    IV.list=r.list; IV.candidates=r.candidates||[]; IV.need=r.needGrade||[]; drawInvList();
-  }).catch(function(e){toast(String(e.message||e),'bad');drawInvPick()});
+    if(!entry||entry.data!==r)draw(r);
+  }).catch(function(e){
+    if(!current())return;
+    if(epoch!==readEpoch_(key))return loadInv(ym);
+    if(entry)toast('更新失败，显示上次资料；重新选择月份可重试','bad');
+    else{toast(String(e.message||e),'bad');drawInvPick()}
+  });
 }
 function drawInvList(){
   var L=IV.list||[];

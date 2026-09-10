@@ -10,6 +10,8 @@
 <meta name="theme-color" content="#08080A">
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preconnect" href="https://script.google.com">
+<link rel="preconnect" href="https://script.googleusercontent.com">
 <title>V&amp;P TRADING</title>
 <style>
   html,body{margin:0;padding:0;height:100%;background:#08080A;overflow:hidden}
@@ -34,7 +36,7 @@
 
 <script>
   var f=document.getElementById('f'), s=document.getElementById('splash');
-  f.addEventListener('load',function(){setTimeout(function(){s.className='gone'},400)});
+  f.addEventListener('load',function(){s.className='gone'});
   setTimeout(function(){s.className='gone'},9000); // 保险：最多 9 秒一定收起
 </script>
 </body>

@@ -31,7 +31,14 @@ function sh_(name) {
 }
 
 /** 读整张表 → 物件阵列。自动跳过表头上方的说明行。 */
-function readTable_(name) {
+var READ_SCOPE_ = null;
+function readScope_(fn) {
+  if (READ_SCOPE_) return fn();
+  READ_SCOPE_ = {};
+  try { return fn(); } finally { READ_SCOPE_ = null; }
+}
+function readTable_(name, fresh) {
+  if (!fresh && READ_SCOPE_ && READ_SCOPE_[name]) return READ_SCOPE_[name];
   var sheet = sh_(name);
   var v = sheet.getDataRange().getValues();
   if (!v.length) return { head: [], rows: [], headRow: 1, sheet: sheet };
@@ -49,7 +56,9 @@ function readTable_(name) {
     o.__row = r + 1;
     rows.push(o);
   }
-  return { head: head, rows: rows, headRow: hr + 1, sheet: sheet };
+  var result = { head: head, rows: rows, headRow: hr + 1, sheet: sheet };
+  if (READ_SCOPE_) READ_SCOPE_[name] = result;
+  return result;
 }
 
 /**
@@ -163,6 +172,9 @@ function login(pin) {
 
 /** 登入 + 载入资料一次搞定（少一次往返，快一倍） */
 function loginAndBoot(pin) {
+  return readScope_(function(){return loginAndBootRead_(pin)});
+}
+function loginAndBootRead_(pin) {
   var r = login(pin);
   if (!r.ok) return r;
   return { ok: true, user: { name: r.name, role: r.role }, boot: bootstrap() };
@@ -177,7 +189,7 @@ function ensureCols_(name, cols) {
   t.sheet.getRange(t.headRow, 1, 1, head.length).setValues([head])
     .setBackground('#1C1C1E').setFontColor('#E8C86A').setFontWeight('bold')
     .setFontFamily('Arial').setFontSize(10).setHorizontalAlignment('center');
-  return readTable_(name);
+  return readTable_(name, true);
 }
 
 function isVoid_(r) { return up_(r.STATUS) === 'VOID'; }
@@ -276,6 +288,9 @@ function adminListUsers(adminPin) {
 }
 
 function getAdminSettings(adminPin) {
+  return readScope_(function(){return getAdminSettingsRead_(adminPin)});
+}
+function getAdminSettingsRead_(adminPin) {
   var result = adminListUsers(adminPin);
   if (!result.ok) return result;
   var r = readTable_('DRIVER').rows[0] || {};
@@ -520,6 +535,9 @@ function adminSetActive(adminPin, target, active) {
 
 /* ---------- 启动资料 ---------- */
 function bootstrap() {
+  return readScope_(bootstrapRead_);
+}
+function bootstrapRead_() {
   var cache = CacheService.getScriptCache();
   try {
     var hit = cache.get('boot');
@@ -818,6 +836,9 @@ function buildWaText_(orders) {
 
 /** 指定订单 ID 生成通知文字 */
 function notifyDriver(ids) {
+  return readScope_(function(){return notifyDriverRead_(ids)});
+}
+function notifyDriverRead_(ids) {
   var t = readTable_('ORDERS');
   var set = {}; (ids || []).forEach(function (i) { set[String(i)] = 1; });
   var picked = t.rows.filter(function (r) { return set[String(r.ORDER_ID)] && !isVoid_(r); });
@@ -963,6 +984,9 @@ function markUnpaid(id) {
 
 /** 未收款清单：依分行分组，附拖欠天数 */
 function getUnpaid(opt) {
+  return readScope_(function(){return getUnpaidRead_(opt)});
+}
+function getUnpaidRead_(opt) {
   opt = opt || {};
   var t = readTable_('ORDERS');
   var today = new Date();
@@ -1014,6 +1038,9 @@ function ruleTypeOf_(rules, region, state) {
 }
 
 function getStatement(opt) {
+  return readScope_(function(){return getStatementRead_(opt)});
+}
+function getStatementRead_(opt) {
   opt = opt || {};
   var month = toNum_(opt.month);
   if (!(month >= 1 && month <= 12)) return { ok: false, msg: '请选择月份' };
@@ -1084,6 +1111,9 @@ function getStatement(opt) {
    含「我的利润」，所以这份档案不要转发给司机。
 ------------------------------------------------------- */
 function getMonthlyReport(opt) {
+  return readScope_(function(){return getMonthlyReportRead_(opt)});
+}
+function getMonthlyReportRead_(opt) {
   opt = opt || {};
   var month = toNum_(opt.month);
   if (!(month >= 1 && month <= 12)) return { ok: false, msg: '请选择月份' };
@@ -1188,6 +1218,9 @@ function getMonthlyReport(opt) {
 
 /* ---------- 报表 ---------- */
 function getDashboard(opt) {
+  return readScope_(function(){return getDashboardRead_(opt)});
+}
+function getDashboardRead_(opt) {
   return dashboardFromTable_(readTable_('ORDERS'), opt);
 }
 function dashboardFromTable_(t, opt) {
@@ -1248,6 +1281,14 @@ function getNavigationOrders() {
     pending: pickOrders_(t, { pending: true }, '', 120),
     dashboard: dashboardFromTable_(t, {})
   };
+}
+// Keep the quick recent-order response independent from full-history summaries.
+function getNavigationSummary() {
+  return readScope_(getNavigationSummaryRead_);
+}
+function getNavigationSummaryRead_() {
+  var t = readTable_('ORDERS');
+  return {pending:pickOrders_(t,{pending:true},'',120),dashboard:dashboardFromTable_(t,{})};
 }
 
 function getOrders(opt) {
@@ -2214,32 +2255,46 @@ function invoiceOrderIds_(iv, orders) {
   }).map(function(o) { return String(o.ORDER_ID); });
 }
 function listInvoiceMonth(p) {
+  return readScope_(function(){return listInvoiceMonthRead_(p)});
+}
+function listInvoiceMonthRead_(p) {
   var ym = String((p && p.ym) || '');
   if (!/^\d{4}$/.test(ym)) return {ok:false,msg:'请选月份'};
   var orders = ensureCols_('ORDERS', ['INVOICE_TO','INV_BRAND']).rows;
   var sm = ensureCols_('SALESMAN', ['发票抬头','公司名','地址','电话','发票方式']);
   var po = perOrderSet_(sm), covered = {}, list = [], groups = {}, candidates = [], need = {}, graded = {};
+  var byId=Object.create(null),byCustomerMonth=Object.create(null),dates=Object.create(null),bills=Object.create(null);
+  orders.forEach(function(o){
+    var id=String(o.ORDER_ID),d=fmtDate_(o.DATE),k=JSON.stringify([custKey_(o),d.slice(2,4)+d.slice(5,7)]);
+    byId[id]=o;dates[id]=d;
+    if(!byCustomerMonth[k])byCustomerMonth[k]=[];
+    byCustomerMonth[k].push(id);
+  });
   ensureCols_('SET_PRICE', ['说明','英文品名']).rows.forEach(function(r){
     if(r['说明']||r['英文品名'])graded[up_(r.SET_TYPE)+'|'+toNum_(r.UNIT_PRICE)]=1;
   });
   invSheet_().rows.forEach(function(iv) {
     if (invVoided_(iv)) return;
-    invoiceOrderIds_(iv, orders).forEach(function(id) { covered[id] = String(iv.INV_NO); });
+    var single=keyOrderId_(String(iv.CUST_KEY||''));
+    var linked=iv.ORDER_IDS?JSON.parse(String(iv.ORDER_IDS)):single?[single]:
+      (byCustomerMonth[JSON.stringify([String(iv.CUST_KEY||''),String(iv.YM)])]||[]);
+    linked.forEach(function(id) { covered[id] = String(iv.INV_NO); });
     if (String(iv.YM) !== ym) return;
-    var linked=invoiceOrderIds_(iv,orders), branches={};
-    orders.forEach(function(o){if(linked.indexOf(String(o.ORDER_ID))>=0)branches[String(o.BRANCH)]=1;});
+    var branches={};
+    linked.forEach(function(id){var o=byId[id];if(o)branches[String(o.BRANCH)]=1;});
     list.push({key:String(iv.CUST_KEY),invNo:String(iv.INV_NO),issued:true,
       salesman:String(iv.SALESMAN),billName:String(iv.BILL_NAME),mode:String(iv.BILL_MODE),
       n:toNum_(iv.ORDERS),amount:toNum_(iv.AMOUNT),branch:Object.keys(branches).join(' / '),nBranch:Object.keys(branches).length,hasAddr:true,
       frozen:!!iv.SNAPSHOT_JSON,orderIds:linked});
   });
   orders.forEach(function(o) {
-    var d = fmtDate_(o.DATE);
+    var d = dates[String(o.ORDER_ID)];
     if (isVoid_(o) || d.slice(2,4)+d.slice(5,7) !== ym) return;
     var gradeKey=up_(o.SET_TYPE)+'|'+toNum_(o.UNIT_PRICE);
     if(!graded[gradeKey]&&!DESC_FALLBACK_[gradeKey]&&!/^BAGS?$/.test(up_(o.SET_TYPE)))need[String(o.SET_TYPE)+' RM '+toNum_(o.UNIT_PRICE)]=1;
     var base = custKey_(o), mode = up_(o.INVOICE_TO)==='COMPANY'?'COMPANY':'SA';
-    var bill = billTo_(o.SALESMAN,mode,sm,o.BRANCH), id=String(o.ORDER_ID);
+    var billKey=JSON.stringify([o.SALESMAN,mode,o.BRANCH]);
+    var bill = bills[billKey]||(bills[billKey]=billTo_(o.SALESMAN,mode,sm,o.BRANCH)), id=String(o.ORDER_ID);
     candidates.push({id:id,customerKey:base,billName:bill.name,salesman:String(o.SALESMAN),
       mode:mode,branch:String(o.BRANCH),date:d,amount:toNum_(o.TOTAL_INCOME),invNo:covered[id]||''});
     if (covered[id]) return;
@@ -2566,6 +2621,9 @@ function saveBillTo(p) {
  * 改成点开名单才呼叫，读一次三百行很快，而且他们改完地址马上就看得到。
  */
 function getNameList() {
+  return readScope_(getNameListRead_);
+}
+function getNameListRead_() {
   var t = ensureCols_('SALESMAN', ['发票抬头', '公司名', '地址', '电话', '发票方式']);
   var out = [];
   t.rows.forEach(function (r) {
@@ -2590,6 +2648,9 @@ function getNameList() {
 }
 
 function getBillTo(p) {
+  return readScope_(function(){return getBillToRead_(p)});
+}
+function getBillToRead_(p) {
   var name = normName_(p && p.salesman);
   var branch = String((p && p.branch) || '').trim();
   var t = ensureCols_('SALESMAN', ['发票抬头', '公司名', '地址', '电话', '发票方式']);

@@ -1,5 +1,14 @@
 # Navigation performance regression tests
 
+The global loading suite additionally covers read-only request-scoped table reuse,
+1,200 orders with 60 invoices, legacy/monthly invoice coverage, independent recent
+order loading, invoice modal races, and cached driver statements. Request-local
+table data is discarded on success or failure; write operations do not use this
+scope. Invoice snapshots are invalidated by invoice and order mutations. Recent
+orders load independently from the shared delivery/dashboard full-history read.
+The outer app removes its fixed 400 ms post-load splash delay and preconnects to
+Google. Google cold-start and PDF conversion latency remain external dependencies.
+
 Run `npm ci` followed by `npm test` from the repository root (Node 20+).
 Tests load the actual `gas/Index.html` in jsdom and control only the Apps Script
 transport. All fixtures are synthetic. No production orders are created.
