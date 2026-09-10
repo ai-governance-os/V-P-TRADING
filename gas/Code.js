@@ -783,13 +783,14 @@ function buildWaText_(orders) {
   // 跟分行一样）——所以每一单前面加回牌子，不能只靠分行名称。判断牌子的逻辑
   // 跟发票那边共用 invBrandOf_，不用重新猜一次。
   var brandList = invBrandList_();
+  var unitTable = ensureCols_('SET_PRICE', ['单位']);
   order.forEach(function (b) {
     L.push('*' + b + '*');
     byBranch[b].forEach(function (o) {
       var qty = toNum_(o.QTY), price = toNum_(o.UNIT_PRICE), tot = toNum_(o.TOTAL_INCOME);
       var brand = invBrandOf_(o, brandList);
       L.push(String(o.SALESMAN || '') + ' — ' + (brand ? brand + ' ' : '') + String(o.SET_TYPE || '') + goodsDesc_(o));
-      L.push('RM ' + price + ' × ' + qty + ' ' + unitOf_(o.SET_TYPE) +
+      L.push('RM ' + price + ' × ' + qty + ' ' + unitOf_(o.SET_TYPE, unitTable) +
              ' = RM ' + (Math.round(tot * 100) / 100));
       var note = String(o.DRV_NOTE || '').trim();
       if (note) L.push('＊ ' + note);

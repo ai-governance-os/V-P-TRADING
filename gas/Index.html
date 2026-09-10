@@ -287,7 +287,7 @@ var HAS_GS = (typeof google!=='undefined' && google.script && google.script.run)
 function call(fn,args){
   var started=Date.now();
   var writes=/^(submitOrder|markPaid|markUnpaid|updateOrder|voidOrder|changeBranch|markDelivered|renameSalesman|mergeBranch|migratePayment|saveSetPrice|toggleSetPrice|setUnitFor|adminSetDriver|adminSetPin|adminRenameUser|adminAddUser|adminSetActive|addSalesman|saveBillTo|voidInvoice|makeInvoicePdf)$/.test(fn);
-  if(writes)invalidateViews_();
+  if(writes)invalidateViews_(fn);
   return new Promise(function(res,rej){
     if(HAS_GS){
       google.script.run.withSuccessHandler(res).withFailureHandler(rej)[fn].apply(null,args||[]);
@@ -295,27 +295,39 @@ function call(fn,args){
       setTimeout(function(){res(MOCK[fn].apply(null,args||[]))},220);
     } else rej(new Error('后端未连接：'+fn));
   }).then(function(r){
-    if(writes)invalidateViews_();
+    if(writes)invalidateViews_(fn);
     recordTiming_(fn,started,true);return r;
   },function(e){
-    if(writes)invalidateViews_();
+    if(writes)invalidateViews_(fn);
     recordTiming_(fn,started,false);throw e;
   });
 }
 /* Session-only snapshots: never persist customer data, and never cache writes.
    Epochs prevent reads started before a save/logout from restoring old data. */
-var VIEW_READ={epoch:0,cache:{},pending:{},seq:{}};
+var VIEW_READ={epoch:0,versions:{orders:0,settings:0},cache:{},pending:{},seq:{}};
 var RPC_TIMINGS=[];
 function recordTiming_(fn,started,ok){
   RPC_TIMINGS.push({fn:fn,ms:Date.now()-started,ok:ok});
   if(RPC_TIMINGS.length>50)RPC_TIMINGS.shift();
 }
-function invalidateViews_(){
-  VIEW_READ.epoch++;VIEW_READ.cache={};VIEW_READ.pending={};
+function readGroup_(key){return key==='adminSettings'?'settings':'orders'}
+function readEpoch_(key){return VIEW_READ.epoch+':'+VIEW_READ.versions[readGroup_(key)]}
+function invalidateViews_(fn){
+  if(!fn){VIEW_READ.epoch++;VIEW_READ.cache={};VIEW_READ.pending={};return}
+  // Invoice issuance/reprinting does not change orders, payments or settings.
+  if(/^(makeInvoicePdf|voidInvoice|saveBillTo)$/.test(fn))return;
+  var groups=/^admin/.test(fn)?['settings']:['orders'];
+  if(fn==='adminSetDriver')groups.push('orders');
+  groups.forEach(function(group){VIEW_READ.versions[group]++});
+  ['cache','pending'].forEach(function(bucket){
+    Object.keys(VIEW_READ[bucket]).forEach(function(key){
+      if(groups.indexOf(readGroup_(key))>=0)delete VIEW_READ[bucket][key];
+    });
+  });
 }
 function warmOrders_(){
   if(!S.user||S.user.role==='driver')return;
-  var epoch=VIEW_READ.epoch;
+  var epoch=readEpoch_('getOrders');
   var specs=[{month:'',pay:'',limit:300},{pending:true,limit:120}];
   var keys=specs.map(function(opt){return 'getOrders'+JSON.stringify([opt])});
   keys.push('getDashboard'+JSON.stringify([{month:''}]));
@@ -325,7 +337,7 @@ function warmOrders_(){
   keys.forEach(function(key,i){
     var pending=request.then(function(result){
       var rows=i===0?result.orders:i===1?result.pending:result.dashboard;
-      if(VIEW_READ.epoch===epoch)VIEW_READ.cache[key]={data:rows,at:Date.now()};
+      if(readEpoch_(key)===epoch)VIEW_READ.cache[key]={data:rows,at:Date.now()};
       return rows;
     });
     VIEW_READ.pending[key]=pending;
@@ -343,7 +355,7 @@ function viewStatus_(view,entry,message,busy){
 }
 function loadView_(view,fn,args,draw,force){
   var el=document.getElementById('v-'+view);
-  var key=fn+JSON.stringify(args),epoch=VIEW_READ.epoch;
+  var key=fn+JSON.stringify(args),epoch=readEpoch_(key);
   var seq=VIEW_READ.seq[view]=(VIEW_READ.seq[view]||0)+1;
   var entry=VIEW_READ.cache[key];
   if(entry){draw(entry.data,el._readKey===key);el._readKey=key}
@@ -356,7 +368,7 @@ function loadView_(view,fn,args,draw,force){
   var pending=VIEW_READ.pending[key];
   if(!pending){
     pending=call(fn,args).then(function(data){
-      if(VIEW_READ.epoch===epoch){
+      if(readEpoch_(key)===epoch){
         var keys=Object.keys(VIEW_READ.cache);
         if(keys.length>=20)delete VIEW_READ.cache[keys[0]];
         VIEW_READ.cache[key]={data:data,at:Date.now()};
@@ -373,14 +385,14 @@ function loadView_(view,fn,args,draw,force){
   }
   return pending.then(function(data){
     if(!current())return;
-    if(VIEW_READ.epoch!==epoch)return retryChanged();
+    if(readEpoch_(key)!==epoch)return retryChanged();
     // A response for a hidden view must not overwrite state shared with another page.
     if(S.view!==view)return;
     draw(data,el._readKey===key);el._readKey=key;
     viewStatus_(view,VIEW_READ.cache[key],'',false);
   },function(e){
     if(!current()||S.view!==view)return;
-    if(VIEW_READ.epoch!==epoch)return retryChanged();
+    if(readEpoch_(key)!==epoch)return retryChanged();
     if(!entry)el.innerHTML='<div class="empty">'+esc(e.message||e)+'</div>';
     viewStatus_(view,entry,entry?'更新失败，当前是上次资料':'载入失败，请重试',false);
   });
@@ -2065,13 +2077,13 @@ function doneMark(){
 /* ================= 设定 · 帐号管理（限 admin） ================= */
 var ROLE_TXT={admin:'管理员 · 可管帐号',partner:'合伙人 · 同等权限',driver:'司机 · 只看送货'};
 function settingsRequest_(force){
-  var key='adminSettings',epoch=VIEW_READ.epoch,entry=VIEW_READ.cache[key];
+  var key='adminSettings',epoch=readEpoch_(key),entry=VIEW_READ.cache[key];
   if(!force&&entry&&Date.now()-entry.at<15000)return Promise.resolve(entry.data);
   if(VIEW_READ.pending[key])return VIEW_READ.pending[key];
   var request=HAS_GS?call('getAdminSettings',[AUTH]):
     Promise.all([call('adminListUsers',[AUTH]),call('adminGetDriver',[AUTH])]).then(function(r){r[0].driver=r[1].driver;return r[0]});
   var pending=request.then(function(r){
-    if(r.ok&&VIEW_READ.epoch===epoch)VIEW_READ.cache[key]={data:r,at:Date.now()};return r;
+    if(r.ok&&readEpoch_(key)===epoch)VIEW_READ.cache[key]={data:r,at:Date.now()};return r;
   });
   VIEW_READ.pending[key]=pending;
   var clean=function(){if(VIEW_READ.pending[key]===pending)delete VIEW_READ.pending[key]};
@@ -2079,18 +2091,38 @@ function settingsRequest_(force){
 }
 function loadSettings(force){
   var el=document.getElementById('v-set');
-  if(el._settingsDirty&&el._settingsEpoch===VIEW_READ.epoch&&!force)return;
-  el.innerHTML='<div class="h1">设定</div><div class="h1s">Accounts</div><div class="load"><div class="spin"></div></div>';
-  var auth=AUTH,epoch=VIEW_READ.epoch;
+  var auth=AUTH,epoch=readEpoch_('adminSettings');
+  if(el._settingsDirty&&el._settingsEpoch===epoch&&!force)return;
+  var entry=VIEW_READ.cache.adminSettings;
+  if(entry&&el._settingsEpoch!==epoch){
+    S.users=entry.data.users;S.drv=entry.data.driver;renderSettings();el._settingsEpoch=epoch;
+    el.oninput=function(){el._settingsDirty=true};
+  }
+  if(el._settingsEpoch!==epoch){
+    el.innerHTML='<div class="h1">设定</div><div class="h1s">Accounts</div><div class="load"><div class="spin"></div></div>';
+  }
+  function status(message){
+    var bar=el.querySelector('.settings-status');
+    if(!bar){bar=document.createElement('div');bar.className='settings-status read-status';el.insertBefore(bar,el.firstChild)}
+    bar.textContent=message;
+  }
+  if(entry&&Date.now()-entry.at>=15000)status('正在后台更新…');
   return settingsRequest_(force).then(function(r){
     if(AUTH!==auth||!S.user)return;
-    if(epoch!==VIEW_READ.epoch){if(S.view==='set')return loadSettings();return}
+    if(epoch!==readEpoch_('adminSettings')){if(S.view==='set')return loadSettings();return}
     if(!r.ok){el.innerHTML='<div class="h1">设定</div><div class="empty">'+esc(r.msg)+'</div>';return}
+    // A user may start editing while the background request is in flight.
+    if(el._settingsDirty&&el._settingsEpoch===epoch){status('资料已更新；保留你正在填写的内容');return}
+    if(entry&&entry.data===r&&el._settingsEpoch===epoch)return;
     S.users=r.users;
     S.drv=r.driver||{name:'',phone:'',allowance:0};renderSettings();
     el._settingsDirty=false;el._settingsEpoch=epoch;
     el.oninput=function(){el._settingsDirty=true};
-  }).catch(function(e){el.innerHTML='<div class="empty">'+esc(e.message||e)+'</div>'});
+  }).catch(function(e){
+    if(AUTH!==auth||!S.user||epoch!==readEpoch_('adminSettings'))return;
+    if(el._settingsEpoch===epoch)status('更新失败，保留上次资料；重新进入设定可重试');
+    else el.innerHTML='<div class="empty">'+esc(e.message||e)+'</div>';
+  });
 }
 function renderSettings(){
   var dv=S.drv||{name:'',phone:'',allowance:0};
