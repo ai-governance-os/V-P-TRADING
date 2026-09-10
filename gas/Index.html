@@ -1282,7 +1282,7 @@ function renderDash(){
      '<label class="lbl">发票 Invoice</label>'+
      '<div style="color:var(--dim);font-size:13px;line-height:1.7;margin-bottom:13px">'+
        '选月份，帮每个客户产生一张发票 PDF。<br>'+
-       '同一个客户当月所有订单列在同一张，号码开过就不会变。</div>'+
+       '支持逐笔、月结，或勾选同一客户的订单合并开票。</div>'+
      '<button class="btn o" style="padding:12px;font-size:14px" onclick="askInv()">开发票 →</button>'+
    '</div>':'')+
 
@@ -1629,19 +1629,19 @@ function loadInv(ym){
   IV.ym=ym;
   openSheet('<div class="load"><div class="spin"></div></div>'+
     '<div style="text-align:center;color:var(--dim);font-size:14px">整理中…</div>');
-  call('listInvoiceMonth',[{ym:ym}]).then(function(r){
+  return call('listInvoiceMonth',[{ym:ym}]).then(function(r){
     if(!r.ok){toast(r.msg,'bad');drawInvPick();return}
-    IV.list=r.list; IV.need=r.needGrade||[]; drawInvList();
+    IV.list=r.list; IV.candidates=r.candidates||[]; IV.need=r.needGrade||[]; drawInvList();
   }).catch(function(e){toast(String(e.message||e),'bad');drawInvPick()});
 }
 function drawInvList(){
   var L=IV.list||[];
-  var body=L.length?L.map(function(x){
+  var body=L.length?L.map(function(x,index){
     return '<div class="sumrow" style="align-items:center">'+
       '<span class="k" style="flex:1">'+
         '<b style="color:var(--ink);font-size:14.5px">'+esc(x.billName)+'</b>'+
         '<span style="opacity:.6;font-size:11.5px"> · '+(x.mode==='COMPANY'?'公司':'个人')+'</span>'+
-        (x.perOrder
+        (x.issued ? '<span class="tag">已开票</span>' : x.perOrder
           ? '<span style="font-size:10.5px;margin-left:6px;padding:2px 7px;border-radius:5px;'+
               'background:rgba(55,138,221,.16);color:#85B7EB">逐笔</span>'
           : '<span style="font-size:10.5px;margin-left:6px;padding:2px 7px;border-radius:5px;'+
@@ -1658,25 +1658,31 @@ function drawInvList(){
         '<button class="chip" onclick="editBill(\''+esc(x.salesman).replace(/'/g,"\\'")+'\',\''+
           (x.nBranch>1?'':esc(x.branch).replace(/'/g,"\\'"))+'\')">资料</button>'+
         (x.invNo?'<button class="chip" onclick="askVoidInv(\''+esc(x.invNo).replace(/'/g,"\\'")+'\')">作废</button>':'')+
-        '<button class="chip on" onclick="dlInv(\''+esc(x.key).replace(/'/g,"\\'")+'\')">PDF</button>'+
+        '<button class="chip on" onclick="dlInvAt('+index+')">PDF</button>'+
       '</span></div>';
   }).join(''):'<div class="hint">这个月没有订单</div>';
 
   openSheet('<div style="font-family:var(--sf);font-size:25px;margin-bottom:3px">开发票</div>'+
-   '<div class="h1s" style="margin-bottom:16px">'+ymLabel(IV.ym)+' · '+L.length+' 个客户</div>'+
+   '<div class="h1s" style="margin-bottom:16px">'+ymLabel(IV.ym)+' · '+L.length+' 项</div>'+
    '<button class="btn o" onclick="drawInvPick()" style="margin-bottom:16px">换一个月</button>'+
    ((IV.need&&IV.need.length)
      ?'<div class="hint" style="margin-bottom:16px;background:rgba(233,168,53,.11);border-color:rgba(233,168,53,.4);color:var(--warn)">'+
         '⚠ 这几组价目还没填「普通 / 好的」，发票上会一律当 NORMAL：<br><b>'+
         IV.need.map(esc).join('</b>、<b>')+'</b><br>'+
         '要改的话到 设定 → 价目表。</div>':'')+
+   '<button class="btn p" onclick="startInvoiceMerge()" style="margin-bottom:16px">选择订单，合并开票</button>'+
+   '<div class="hint">已开票项目可重印；未开票项目按原设定开票。合并时请先选择订单。</div>'+
    body+
    '<div style="height:14px"></div><button class="btn o" onclick="closeSheet()">关闭</button>');
 }
-function dlInv(key){
+function dlInvAt(index){
+  var x=IV.list[index];if(!x)return;
+  dlInv(x.invNo?{invNo:x.invNo}:{orderIds:x.orderIds,expectedTotal:x.amount});
+}
+function dlInv(request){
   toast('产生中…','ok');
-  call('makeInvoicePdf',[{ym:IV.ym,key:key,by:(S.user||{}).name||''}]).then(function(r){
-    if(!r.ok){toast(r.msg,'bad');return}
+  call('makeInvoicePdf',[{ym:IV.ym,invNo:request.invNo||'',orderIds:request.orderIds,expectedTotal:request.expectedTotal,by:(S.user||{}).name||''}]).then(function(r){
+    if(!r.ok){loadInv(IV.ym).then(function(){toast(r.msg,'bad')});return}
     var bin=atob(r.b64), arr=new Uint8Array(bin.length);
     for(var i=0;i<bin.length;i++)arr[i]=bin.charCodeAt(i);
     var url=URL.createObjectURL(new Blob([arr],{type:'application/pdf'}));
@@ -1685,7 +1691,50 @@ function dlInv(key){
     setTimeout(function(){URL.revokeObjectURL(url)},4000);
     toast(r.invNo+' 已下载','ok');
     loadInv(IV.ym);
-  }).catch(function(e){toast(String(e.message||e),'bad')});
+  }).catch(function(e){loadInv(IV.ym).then(function(){toast(String(e.message||e),'bad')})});
+}
+var INVMERGE={}, INVMERGEFILTER='';
+function startInvoiceMerge(){INVMERGE={};INVMERGEFILTER='';drawInvoiceMerge();}
+function filterInvoiceMerge(value){INVMERGEFILTER=value;INVMERGE={};drawInvoiceMerge();}
+function toggleInvoiceMerge(index){
+  var c=IV.candidates[index];if(!c||c.invNo)return;
+  if(INVMERGE[c.id])delete INVMERGE[c.id];else INVMERGE[c.id]=true;
+  drawInvoiceMerge();
+}
+function drawInvoiceMerge(){
+  var rows=IV.candidates||[], selected=rows.filter(function(c){return INVMERGE[c.id]&&!c.invNo;}),
+    key=selected.length?selected[0].customerKey:'',total=selected.reduce(function(n,c){return n+c.amount;},0);
+  var customers={};rows.forEach(function(c){customers[c.customerKey]=c.billName+' · '+(c.mode==='COMPANY'?'公司':'个人');});
+  openSheet('<div class="h1">选择订单合并开票</div>'+
+    '<div class="hint">同一客户、同一开票对象、同一个月。已开票的订单须先作废原发票，才可重新选择。原订单不需要取消。</div>'+
+    '<label class="lbl">筛选客户</label><select class="inp" onchange="filterInvoiceMerge(this.value)"><option value="">全部客户</option>'+
+    Object.keys(customers).sort().map(function(k){return '<option value="'+esc(k)+'" '+(INVMERGEFILTER===k?'selected':'')+'>'+esc(customers[k])+'</option>';}).join('')+'</select>'+
+    rows.map(function(c,i){
+      if(INVMERGEFILTER&&c.customerKey!==INVMERGEFILTER)return '';
+      var blocked=!!c.invNo||!!(key&&key!==c.customerKey);
+      return '<label style="display:flex;gap:12px;align-items:center;padding:14px 0;border-bottom:1px solid var(--line);opacity:'+(blocked?'.5':'1')+'">'+
+        '<input type="checkbox" '+(INVMERGE[c.id]?'checked ':'')+(blocked?'disabled ':'')+'onchange="toggleInvoiceMerge('+i+')">'+
+        '<span><b>'+esc(c.billName)+'</b> · '+(c.mode==='COMPANY'?'公司':'个人')+'<br>'+esc(c.id)+' · '+esc(c.date)+'<br>'+esc(c.branch)+' · RM '+rm(c.amount)+
+        (c.invNo?'<br>已开 '+esc(c.invNo):'')+'</span></label>';
+    }).join('')+
+    '<div class="hint">已选 '+selected.length+' 笔 · 合计 RM '+rm(total)+'</div>'+
+    '<button class="btn p" '+(selected.length?'':'disabled')+' onclick="confirmInvoiceMerge()">下一步：确认明细</button>'+
+    '<button class="btn o" style="margin-top:9px" onclick="drawInvList()">返回</button>');
+}
+function confirmInvoiceMerge(){
+  var rows=(IV.candidates||[]).filter(function(c){return INVMERGE[c.id]&&!c.invNo;});
+  if(!rows.length)return;
+  var total=rows.reduce(function(n,c){return n+c.amount;},0);
+  openSheet('<div class="h1">确认合并开票</div><div class="hint">'+esc(rows[0].billName)+' · '+rows.length+' 笔 · RM '+rm(total)+'</div>'+
+    rows.map(function(c){return '<div class="sumrow">'+esc(c.id)+' · '+esc(c.date)+' · RM '+rm(c.amount)+'</div>';}).join('')+
+    '<div class="hint">确认后会生成一个新发票号码。所选订单将记为已开票，重印时内容固定。</div>'+
+    '<button class="btn p" id="mergeInvoiceGo" onclick="issueInvoiceMerge()">确认开票并下载 PDF</button>'+
+    '<button class="btn o" style="margin-top:9px" onclick="drawInvoiceMerge()">返回选择</button>');
+}
+function issueInvoiceMerge(){
+  var b=document.getElementById('mergeInvoiceGo');if(b){b.disabled=true;b.textContent='开票中…';}
+  var total=(IV.candidates||[]).reduce(function(n,c){return n+(INVMERGE[c.id]?c.amount:0);},0);
+  dlInv({orderIds:Object.keys(INVMERGE),expectedTotal:total});
 }
 /* 作废发票号码 —— 不删除，保留号码并标记，帐上的序号才不会断 */
 function askVoidInv(no){

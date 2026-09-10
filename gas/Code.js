@@ -2161,7 +2161,7 @@ function invSheet_() {
     sh.getRange(2, 1, 1, head.length).setValues([head]).setFontWeight('bold');
     sh.setFrozenRows(2);
   }
-  return ensureCols_('INVOICE', ['STATUS', 'VOID_AT', 'VOID_BY', 'VOID_REASON']);
+  return ensureCols_('INVOICE', ['STATUS', 'VOID_AT', 'VOID_BY', 'VOID_REASON', 'ORDER_IDS', 'SNAPSHOT_JSON']);
 }
 function invVoided_(r) { return up_(r.STATUS) === 'VOID'; }
 
@@ -2195,73 +2195,56 @@ function invNoFor_(ym, key, meta) {
 }
 
 /** 某个月有哪些客户可以开发票 */
+// Old invoices have no order mapping: conservatively reserve their original month/customer.
+function invoiceOrderIds_(iv, orders) {
+  if (iv.ORDER_IDS) return JSON.parse(String(iv.ORDER_IDS));
+  var key = String(iv.CUST_KEY || ''), single = keyOrderId_(key);
+  if (single) return [single];
+  return orders.filter(function(o) {
+    var d = fmtDate_(o.DATE);
+    return custKey_(o) === key && d.slice(2,4)+d.slice(5,7) === String(iv.YM);
+  }).map(function(o) { return String(o.ORDER_ID); });
+}
 function listInvoiceMonth(p) {
-  var ym = String((p && p.ym) || '').trim();          // 例 '2607'
-  if (!/^\d{4}$/.test(ym)) return { ok: false, msg: '请选月份' };
-  var yy = '20' + ym.slice(0, 2), mm = parseInt(ym.slice(2), 10);
-
-  var t = ensureCols_('ORDERS', ['INVOICE_TO', 'INV_BRAND']);
-  var sp = ensureCols_('SET_PRICE', ['说明', '英文品名']);
-  var smT = ensureCols_('SALESMAN', ['发票抬头', '公司名', '地址', '电话', '发票方式']);   // 只读一次
-  var perOrder = perOrderSet_(smT);
-  var graded = {};
-  sp.rows.forEach(function (r) {
-    if (!r.SET_TYPE) return;
-    var k = up_(r.SET_TYPE) + '|' + toNum_(r.UNIT_PRICE);
-    if (String(r['说明'] || '').trim() || String(r['英文品名'] || '').trim()) graded[k] = 1;
+  var ym = String((p && p.ym) || '');
+  if (!/^\d{4}$/.test(ym)) return {ok:false,msg:'请选月份'};
+  var orders = ensureCols_('ORDERS', ['INVOICE_TO','INV_BRAND']).rows;
+  var sm = ensureCols_('SALESMAN', ['发票抬头','公司名','地址','电话','发票方式']);
+  var po = perOrderSet_(sm), covered = {}, list = [], groups = {}, candidates = [], need = {}, graded = {};
+  ensureCols_('SET_PRICE', ['说明','英文品名']).rows.forEach(function(r){
+    if(r['说明']||r['英文品名'])graded[up_(r.SET_TYPE)+'|'+toNum_(r.UNIT_PRICE)]=1;
   });
-  // 先看这个月已经开出去哪些发票 —— 决定谁能走逐笔要用到
-  var issued = {}, voided = {};
-  invSheet_().rows.forEach(function (r) {
-    if (String(r.YM) !== ym) return;
-    if (invVoided_(r)) { voided[up_(r.CUST_KEY)] = (voided[up_(r.CUST_KEY)] || 0) + 1; return; }
-    issued[up_(r.CUST_KEY)] = String(r.INV_NO);
+  invSheet_().rows.forEach(function(iv) {
+    if (invVoided_(iv)) return;
+    invoiceOrderIds_(iv, orders).forEach(function(id) { covered[id] = String(iv.INV_NO); });
+    if (String(iv.YM) !== ym) return;
+    var linked=invoiceOrderIds_(iv,orders), branches={};
+    orders.forEach(function(o){if(linked.indexOf(String(o.ORDER_ID))>=0)branches[String(o.BRANCH)]=1;});
+    list.push({key:String(iv.CUST_KEY),invNo:String(iv.INV_NO),issued:true,
+      salesman:String(iv.SALESMAN),billName:String(iv.BILL_NAME),mode:String(iv.BILL_MODE),
+      n:toNum_(iv.ORDERS),amount:toNum_(iv.AMOUNT),branch:Object.keys(branches).join(' / '),nBranch:Object.keys(branches).length,hasAddr:true,
+      frozen:!!iv.SNAPSHOT_JSON,orderIds:linked});
   });
-
-  var needMap = {};
-  var g = {};
-  t.rows.forEach(function (r) {
-    if (isVoid_(r)) return;
-    // DATE 在表里是日期物件不是字串，一定要经过 fmtDate_
-    var d = fmtDate_(r.DATE);
-    if (d.slice(0, 4) !== yy || parseInt(String(r.MONTH), 10) !== mm) return;
-    var gk = up_(r.SET_TYPE) + '|' + toNum_(r.UNIT_PRICE);
-    if (!graded[gk] && !DESC_FALLBACK_[gk] && !/^BAGS?$/.test(up_(r.SET_TYPE)))
-      needMap[String(r.SET_TYPE).trim() + ' RM ' + toNum_(r.UNIT_PRICE)] = 1;
-    var mode = up_(r.INVOICE_TO) === 'COMPANY' ? 'COMPANY' : 'SA';
-    // 这个月如果已经用「月结」开过发票了，就维持月结 ——
-    // 不然同一笔生意会再拿一个新号码，变成开了两张。已经开出去的不动。
-    var po = !!perOrder[poKey_(r.SALESMAN, r.BRANCH)] && !issued[up_(custKey_(r))];
-    var key = custKey_(r, po);
-    if (!g[key]) {
-      var b = billTo_(r.SALESMAN, mode, smT, r.BRANCH);
-      g[key] = { key: key, salesman: String(r.SALESMAN || ''), mode: mode,
-                 billName: b.name, brs: {},
-                 hasAddr: !!b.addr, n: 0, amount: 0,
-                 perOrder: po,
-                 orderId: po ? String(r.ORDER_ID || '').trim() : '',
-                 date: po ? fmtDate_(r.DATE) : '' };
-    }
-    // 月结可能跨分行 —— 清单上全部列出来，不要只显示碰巧第一笔那间
-    var bn = String(r.BRANCH || '').trim();
-    if (bn) g[key].brs[bn] = 1;
-    g[key].n++; g[key].amount += toNum_(r.TOTAL_INCOME);
+  orders.forEach(function(o) {
+    var d = fmtDate_(o.DATE);
+    if (isVoid_(o) || d.slice(2,4)+d.slice(5,7) !== ym) return;
+    var gradeKey=up_(o.SET_TYPE)+'|'+toNum_(o.UNIT_PRICE);
+    if(!graded[gradeKey]&&!DESC_FALLBACK_[gradeKey]&&!/^BAGS?$/.test(up_(o.SET_TYPE)))need[String(o.SET_TYPE)+' RM '+toNum_(o.UNIT_PRICE)]=1;
+    var base = custKey_(o), mode = up_(o.INVOICE_TO)==='COMPANY'?'COMPANY':'SA';
+    var bill = billTo_(o.SALESMAN,mode,sm,o.BRANCH), id=String(o.ORDER_ID);
+    candidates.push({id:id,customerKey:base,billName:bill.name,salesman:String(o.SALESMAN),
+      mode:mode,branch:String(o.BRANCH),date:d,amount:toNum_(o.TOTAL_INCOME),invNo:covered[id]||''});
+    if (covered[id]) return;
+    var per = !!po[poKey_(o.SALESMAN,o.BRANCH)], key=custKey_(o,per);
+    if (!groups[key]) groups[key]={key:key,salesman:String(o.SALESMAN),billName:bill.name,mode:mode,
+      n:0,amount:0,brs:{},hasAddr:!!bill.addr,perOrder:per,orderId:per?id:'',date:per?d:'',orderIds:[]};
+    var g=groups[key]; g.n++;g.amount+=toNum_(o.TOTAL_INCOME);g.brs[String(o.BRANCH)]=1;g.orderIds.push(id);
   });
-
-  var need = Object.keys(needMap).sort();
-
-  var list = Object.keys(g).map(function (k) {
-    g[k].amount = Math.round(g[k].amount * 100) / 100;
-    g[k].invNo = issued[up_(k)] || '';
-    g[k].voided = voided[up_(k)] || 0;
-    var brs = Object.keys(g[k].brs);
-    g[k].branch = brs.join(' / ');
-    g[k].nBranch = brs.length;
-    delete g[k].brs;
-    return g[k];
-  }).sort(function (a, b) { return b.amount - a.amount; });
-
-  return { ok: true, ym: ym, list: list, needGrade: need };
+  Object.keys(groups).forEach(function(k) {
+    var g=groups[k];g.branch=Object.keys(g.brs).join(' / ');g.nBranch=Object.keys(g.brs).length;
+    g.amount=Math.round(g.amount*100)/100;list.push(g);
+  });
+  return {ok:true,ym:ym,list:list,candidates:candidates,needGrade:Object.keys(need).sort()};
 }
 
 /** 组一张发票的完整资料（不配号码，纯预览用 preview=true） */
@@ -2270,7 +2253,8 @@ function getInvoice(p) {
   var key = String((p && p.key) || '').trim();
   if (!/^\d{4}$/.test(ym) || !key) return { ok: false, msg: '参数不对' };
   var yy = '20' + ym.slice(0, 2), mm = parseInt(ym.slice(2), 10);
-  var wantOrder = keyOrderId_(key);                       // 逐笔才有值
+  var selected = p.orderIds || null;
+  var wantOrder = selected ? '' : keyOrderId_(key);                       // 逐笔才有值
   var baseKey = wantOrder ? key.slice(0, key.indexOf('#')) : key;
   var mode = baseKey.split('|')[1] === 'COMPANY' ? 'COMPANY' : 'SA';
   var salesman = baseKey.split('|')[0];
@@ -2283,6 +2267,7 @@ function getInvoice(p) {
   var lines = [], sub = 0, qty = 0, gross = 0;
   t.rows.forEach(function (r) {
     if (isVoid_(r) || custKey_(r) !== baseKey) return;
+    if (selected && selected.indexOf(String(r.ORDER_ID)) < 0) return;
     // 逐笔：只收这一笔订单
     if (wantOrder && String(r.ORDER_ID || '').trim() !== wantOrder) return;
     // DATE 在表里是日期物件不是字串，一定要经过 fmtDate_
@@ -2470,30 +2455,59 @@ function invoiceHtml_(iv, invNo) {
 
 /** 产生发票 PDF，回传 base64 让前端下载。会配一个号码并记下来。 */
 function makeInvoicePdf(p) {
-  var iv = getInvoice(p);
-  if (!iv.ok) return iv;
-
-  var r = withLock_(function () {
-    return { ok: true, inv: invNoFor_(iv.ym, iv.key, {
-      salesman: iv.salesman, mode: iv.mode, billName: iv.billTo.name,
-      n: iv.lines.length, amount: iv.total, by: (p && p.by) || ''
-    }) };
+  p=p||{};
+  // Mapping and snapshot are committed together under the same lock as duplicate checking.
+  var result=withLock_(function() {
+    var t=invSheet_(), hit=null, iv, ids;
+    if (p.invNo) {
+      t.rows.forEach(function(r){if(String(r.INV_NO)===String(p.invNo))hit=r;});
+      if(!hit||invVoided_(hit))return {ok:false,msg:'这张发票不存在或已作废，请刷新'};
+      if(hit.SNAPSHOT_JSON)return {ok:true,iv:JSON.parse(String(hit.SNAPSHOT_JSON)),no:String(hit.INV_NO),isNew:false};
+      iv=getInvoice({ym:String(hit.YM),key:String(hit.CUST_KEY)});
+      if(!iv.ok)return iv;
+      if(Math.abs(iv.total-toNum_(hit.AMOUNT))>0.005||iv.lines.length!==toNum_(hit.ORDERS))
+        return {ok:false,msg:'旧发票的订单内容已变动，不能用原号码重印。请核对原 PDF 后处理作废重开'};
+      ids=invoiceOrderIds_(hit,readTable_('ORDERS').rows);
+    } else {
+      ids=p.orderIds;
+      if(!Array.isArray(ids)||!ids.length)return {ok:false,msg:'请刷新发票清单，再选择要开票的订单'};
+      ids=ids.map(String).sort();
+      if(ids.length>300||ids.some(function(id,i){return i&&id===ids[i-1];}))return {ok:false,msg:'订单选择不正确，最多选择 300 笔'};
+      var orders=readTable_('ORDERS').rows, picked=orders.filter(function(o){return ids.indexOf(String(o.ORDER_ID))>=0;});
+      if(picked.length!==ids.length||picked.some(isVoid_))return {ok:false,msg:'订单不存在或已作废，请刷新'};
+      var base=custKey_(picked[0]);
+      if(picked.some(function(o){var d=fmtDate_(o.DATE);return custKey_(o)!==base||d.slice(2,4)+d.slice(5,7)!==String(p.ym);}))
+        return {ok:false,msg:'只能合并同一客户、同一开票对象、同一个月的订单'};
+      var conflict='';
+      t.rows.forEach(function(r){if(!invVoided_(r)&&invoiceOrderIds_(r,orders).some(function(id){return ids.indexOf(id)>=0;}))conflict=String(r.INV_NO);});
+      if(conflict)return {ok:false,msg:'所选订单已开在 '+conflict+'，请先作废原发票或取消选择，再刷新'};
+      iv=getInvoice({ym:p.ym,key:base,orderIds:ids});
+      if(!iv.ok)return iv;
+      if(iv.lines.length!==ids.length)return {ok:false,msg:'订单日期资料不一致，请核对订单月份后再开票'};
+      if(p.expectedTotal!==undefined&&Math.abs(iv.total-Number(p.expectedTotal))>0.005)
+        return {ok:false,msg:'订单金额刚刚有变动，请刷新后重新确认'};
+    }
+    var snapshot=JSON.stringify(iv);
+    if(snapshot.length>45000)return {ok:false,msg:'所选明细太多，请减少订单数量后再开票'};
+    if(hit){
+      var values=t.head.map(function(h){return h==='ORDER_IDS'?JSON.stringify(ids):h==='SNAPSHOT_JSON'?snapshot:(hit[h]===undefined?'':hit[h]);});
+      t.sheet.getRange(hit.__row,1,1,t.head.length).setValues([values]);
+      return {ok:true,iv:iv,no:String(hit.INV_NO),isNew:false};
+    }
+    var max=0;t.rows.forEach(function(r){if(String(r.YM)===String(p.ym)){var m=String(r.INV_NO).match(/-(\d+)$/);if(m)max=Math.max(max,Number(m[1]));}});
+    var no='INV-'+p.ym+'-'+String(max+1).padStart(3,'0');
+    var meta={INV_NO:no,YM:String(p.ym),CUST_KEY:'SELECT:'+no,SALESMAN:iv.salesman,BILL_MODE:iv.mode,
+      BILL_NAME:iv.billTo.name,ORDERS:ids.length,AMOUNT:iv.total,ISSUED_AT:Utilities.formatDate(new Date(),TZ,'yyyy-MM-dd HH:mm'),
+      ISSUED_BY:p.by||'',ORDER_IDS:JSON.stringify(ids),SNAPSHOT_JSON:snapshot};
+    t.sheet.appendRow(t.head.map(function(h){return meta[h]===undefined?'':meta[h];}));
+    return {ok:true,iv:iv,no:no,isNew:true};
   });
-  if (!r.ok) return r;
-
-  var invNo = r.inv.no;
+  if(!result.ok)return result;
   try {
-    var html = invoiceHtml_(iv, invNo);
-    var pdf = Utilities.newBlob(html, MimeType.HTML, invNo + '.html').getAs(MimeType.PDF);
-    return {
-      ok: true, invNo: invNo, isNew: r.inv.isNew,
-      filename: invNo + ' ' + iv.billTo.name.replace(/[\\/:*?"<>|]/g, '') + '.pdf',
-      b64: Utilities.base64Encode(pdf.getBytes()),
-      total: iv.total, lines: iv.lines.length
-    };
-  } catch (e) {
-    return { ok: false, msg: '产生 PDF 失败：' + friendlyErr_(e), invNo: invNo };
-  }
+    var pdf=Utilities.newBlob(invoiceHtml_(result.iv,result.no),MimeType.HTML,result.no+'.html').getAs(MimeType.PDF);
+    return {ok:true,invNo:result.no,isNew:result.isNew,filename:result.no+' '+result.iv.billTo.name.replace(/[\\/:*?"<>|]/g,'')+'.pdf',
+      b64:Utilities.base64Encode(pdf.getBytes()),total:result.iv.total,lines:result.iv.lines.length};
+  } catch(e){return {ok:false,msg:'号码已保留为 '+result.no+'，请刷新后按该发票 PDF 重试：'+friendlyErr_(e),invNo:result.no};}
 }
 
 /** 填销售员的发票资料（抬头 / 公司 / 地址 / 电话）

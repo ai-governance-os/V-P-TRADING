@@ -47,3 +47,17 @@ authorization, one USERS read for settings, lazy spreadsheet connection, and
 bootstrap's reuse of BRANCH data (including historical inactive brands).
 The PIN page's fonts load without blocking render; the Vercel wrapper removes
 its extra 400ms delay and shortens the splash fade to 150ms.
+
+Invoice selection: `invoice-merge.cjs` exercises the backend with synthetic tables,
+covering selected order mapping, customer/month/billing-mode validation, duplicate
+issuance, void/reissue, immutable reprint snapshots, changed-total confirmation,
+legacy invoices and PDF failures. `invoice-merge-ui.cjs` verifies selection,
+disabled issued orders, confirmation totals and issued versus pending PDF routing.
+New invoices persist ORDER_IDS and SNAPSHOT_JSON together in the INVOICE row under
+the script lock. Old invoices reserve their original customer/month or order key;
+their first reprint snapshots current details only if total and count match the
+record. Historical original item contents cannot be reconstructed from old metadata.
+Selection is limited to one customer, billing mode and month, at most 300 orders;
+snapshots above 45,000 characters are rejected before allocating a number.
+The private regression harness invalidates UI snapshots after direct MOCK mutations
+and awaits the dashboard read instead of assuming a fixed delay is sufficient.

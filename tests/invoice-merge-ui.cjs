@@ -1,0 +1,11 @@
+const fs=require('node:fs'),assert=require('node:assert/strict'),{JSDOM}=require('jsdom');
+const dom=new JSDOM(fs.readFileSync('gas/Index.html','utf8').replace(/<\?=.*?\?>/g,'TEST'),{runScripts:'dangerously',url:'https://test.local'});
+const w=dom.window,d=w.document;w.S.user={name:'TEST',role:'admin'};
+const row=(id,customerKey='SAM|SA',invNo='')=>({id,customerKey,invNo,billName:customerKey.split('|')[0],branch:'BRANCH',mode:'SA',date:'2026-09-09',amount:550});
+w.IV={ym:'2609',list:[],candidates:[row('A'),row('B'),row('C','SAM|SA','INV-2609-002'),row('D','OTHER|SA')]};
+w.startInvoiceMerge();let checks=d.querySelectorAll('input[type=checkbox]');assert.equal(checks[2].disabled,true);
+checks[0].click();checks=d.querySelectorAll('input[type=checkbox]');assert.equal(checks[3].disabled,true);assert.equal(checks[1].disabled,false);
+checks[1].click();w.confirmInvoiceMerge();assert.ok(d.getElementById('sheetBody').textContent.includes('1,100.00'));
+let sent;w.dlInv=request=>{sent=request;};w.issueInvoiceMerge();assert.deepEqual(Array.from(sent.orderIds),['A','B']);assert.equal(d.getElementById('mergeInvoiceGo').disabled,true);
+w.IV.list=[{invNo:'INV-2609-002'},{orderIds:['A']}];w.dlInvAt(0);assert.equal(sent.invNo,'INV-2609-002');w.dlInvAt(1);assert.deepEqual(Array.from(sent.orderIds),['A']);
+dom.window.close();console.log('8 invoice merge UI assertions passed');
