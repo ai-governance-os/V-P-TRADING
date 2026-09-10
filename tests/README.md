@@ -1,5 +1,11 @@
 # Navigation performance regression tests
 
+`back-navigation.cjs` exercises native history Back/Forward, the in-app Back
+button, modal discard/cancel, the home boundary, role restrictions, and logout.
+History stores only route names and a per-login nonce, never forms or credentials.
+Modal redraws do not add history entries. A clean preview closes on Back; edited
+forms require discard confirmation unless the explicit Cancel/Save flow closes it.
+
 The global loading suite additionally covers read-only request-scoped table reuse,
 1,200 orders with 60 invoices, legacy/monthly invoice coverage, independent recent
 order loading, invoice modal races, and cached driver statements. Request-local
